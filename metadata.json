@@ -1,0 +1,6 @@
+{
+  "name": "GPS TRACKER",
+  "description": "PWA GPS Tracker with OpenStreetMap, live distance tracking, split intervals, coordinates, and activity history.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

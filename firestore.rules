@@ -1,0 +1,19 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /shared_tracks/{trackId} {
+      // Anyone can read shared tracks if they have the ID / share code
+      allow read: if true;
+      
+      // Anyone can upload a new shared track
+      allow create: if request.resource.data.shareCode != null;
+      
+      // Allow updates if allowPublicEdit is true or if user is the original creator
+      allow update: if resource.data.allowPublicEdit == true 
+                    || (request.auth != null && resource.data.ownerUid == request.auth.uid);
+                    
+      // Only the creator or admin can delete
+      allow delete: if request.auth != null && resource.data.ownerUid == request.auth.uid;
+    }
+  }
+}

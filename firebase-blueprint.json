@@ -1,0 +1,54 @@
+{
+  "entities": {
+    "SharedTrack": {
+      "title": "SharedTrack",
+      "description": "Shared GPS Rally Track with permissions and full telemetry data",
+      "type": "object",
+      "properties": {
+        "shareCode": {
+          "type": "string",
+          "description": "Unique 6-character code e.g. RLY-482"
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the activity"
+        },
+        "ownerUid": {
+          "type": "string",
+          "description": "User UID who created/uploaded the track"
+        },
+        "ownerName": {
+          "type": "string",
+          "description": "Name of the admin/owner"
+        },
+        "allowPublicEdit": {
+          "type": "boolean",
+          "description": "Whether other team members can edit splits and notes"
+        },
+        "adminPinHash": {
+          "type": "string",
+          "description": "Optional pin to protect admin changes"
+        },
+        "sessionData": {
+          "type": "object",
+          "description": "Full ActivitySession object with coordinates and splits"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["shareCode", "title", "allowPublicEdit", "sessionData", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/shared_tracks/{trackId}": {
+      "schema": "SharedTrack",
+      "description": "Collection of shared rally tracks"
+    }
+  }
+}

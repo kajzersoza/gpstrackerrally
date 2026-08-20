@@ -1,0 +1,696 @@
+import React, { useEffect, useRef, useState } from 'react';
+import L from 'leaflet';
+import { Crosshair, Layers, Plus, Minus, Check } from 'lucide-react';
+import { Coordinate, Split } from '../types';
+
+export type MapLayerType = 'osm' | 'voyager' | 'positron' | 'cyclosm' | 'satellite';
+
+interface OsmMapProps {
+  coordinates: Coordinate[];
+  currentLocation: Coordinate | null;
+  splits?: Split[];
+  mapLayer?: MapLayerType;
+  isTracking?: boolean;
+  className?: string;
+  interactive?: boolean;
+  onRecenter?: () => void;
+  showLayerSelector?: boolean;
+  showZoomControls?: boolean;
+  onLayerChange?: (layer: MapLayerType) => void;
+  focusedSplitId?: string | null;
+  onSelectSplit?: (split: Split) => void;
+}
+
+export const OsmMap: React.FC<OsmMapProps> = ({
+  coordinates,
+  currentLocation,
+  splits = [],
+  mapLayer = 'osm',
+  isTracking = false,
+  className = '',
+  interactive = true,
+  onRecenter,
+  showLayerSelector = true,
+  showZoomControls = true,
+  onLayerChange,
+  focusedSplitId = null,
+  onSelectSplit,
+}) => {
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
+  const polylineRef = useRef<L.Polyline | null>(null);
+  const polylineCasingRef = useRef<L.Polyline | null>(null);
+  const currentMarkerRef = useRef<L.Marker | null>(null);
+  const startMarkerRef = useRef<L.Marker | null>(null);
+  const stopMarkerRef = useRef<L.Marker | null>(null);
+  const splitMarkersGroupRef = useRef<L.LayerGroup | null>(null);
+  const splitMarkersMapRef = useRef<Map<string, L.Marker>>(new Map());
+  const hasInitialCenteredRef = useRef<boolean>(false);
+  const [showLayersMenu, setShowLayersMenu] = useState(false);
+  const [internalLayer, setInternalLayer] = useState<MapLayerType>(mapLayer);
+
+  // Sync internal layer with prop if prop changes
+  useEffect(() => {
+    setInternalLayer(mapLayer);
+  }, [mapLayer]);
+
+  // Map Tile URL providers
+  const getTileConfig = (layer: string) => {
+    switch (layer) {
+      case 'voyager':
+        return {
+          url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+          attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+          maxZoom: 19,
+        };
+      case 'positron':
+        return {
+          url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+          attribution: '&copy; <a href="https://carto.com/">CARTO</a>',
+          maxZoom: 19,
+        };
+      case 'cyclosm':
+        return {
+          url: 'https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png',
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
+          maxZoom: 18,
+        };
+      case 'satellite':
+        return {
+          url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+          attribution: '&copy; Esri',
+          maxZoom: 18,
+        };
+      case 'osm':
+      default:
+        return {
+          url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+          maxZoom: 19,
+        };
+    }
+  };
+
+  // Initialize Map
+  useEffect(() => {
+    if (!mapContainerRef.current) return;
+
+    if (mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+    }
+
+    const defaultCenter: [number, number] = currentLocation
+      ? [currentLocation.lat, currentLocation.lng]
+      : coordinates.length > 0
+      ? [coordinates[coordinates.length - 1].lat, coordinates[coordinates.length - 1].lng]
+      : [37.7775, -122.4164]; // San Francisco default
+
+    const map = L.map(mapContainerRef.current, {
+      center: defaultCenter,
+      zoom: 14,
+      zoomControl: false,
+      attributionControl: true,
+      dragging: interactive,
+      touchZoom: interactive,
+      scrollWheelZoom: interactive,
+      doubleClickZoom: interactive,
+      boxZoom: false,
+    });
+
+    const tileConfig = getTileConfig(internalLayer);
+    const tileLayer = L.tileLayer(tileConfig.url, {
+      attribution: tileConfig.attribution,
+      maxZoom: tileConfig.maxZoom,
+    }).addTo(map);
+
+    tileLayerRef.current = tileLayer;
+
+    // Polyline casing (shadow/border for high contrast on all map layers)
+    const polylineCasing = L.polyline([], {
+      color: '#ffffff',
+      weight: 7,
+      opacity: 0.85,
+      lineCap: 'round',
+      lineJoin: 'round',
+    }).addTo(map);
+    polylineCasingRef.current = polylineCasing;
+
+    // Main vibrant path polyline
+    const polyline = L.polyline([], {
+      color: '#0060e6',
+      weight: 4.5,
+      opacity: 0.95,
+      lineCap: 'round',
+      lineJoin: 'round',
+    }).addTo(map);
+    polylineRef.current = polyline;
+
+    mapRef.current = map;
+
+    // Handle container resize
+    const resizeObserver = new ResizeObserver(() => {
+      if (mapRef.current) {
+        mapRef.current.invalidateSize();
+      }
+    });
+    resizeObserver.observe(mapContainerRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, []);
+
+  // Update Tile Layer when layer changes
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const tileConfig = getTileConfig(internalLayer);
+
+    if (tileLayerRef.current) {
+      mapRef.current.removeLayer(tileLayerRef.current);
+    }
+
+    const newTileLayer = L.tileLayer(tileConfig.url, {
+      attribution: tileConfig.attribution,
+      maxZoom: tileConfig.maxZoom,
+    }).addTo(mapRef.current);
+
+    tileLayerRef.current = newTileLayer;
+  }, [internalLayer]);
+
+  // Update Polyline and Markers
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    const latLngs: [number, number][] = coordinates.map((c) => [c.lat, c.lng]);
+
+    // Update casing and main polyline
+    if (polylineCasingRef.current) {
+      polylineCasingRef.current.setLatLngs(latLngs);
+    }
+    if (polylineRef.current) {
+      polylineRef.current.setLatLngs(latLngs);
+    }
+
+    // Start marker (Flag badge with sharp pointer tip)
+    if (latLngs.length > 0) {
+      const startLatLng = latLngs[0];
+      const startIcon = L.divIcon({
+        className: 'custom-start-badge',
+        html: `
+          <div style="
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 66px;
+            cursor: pointer;
+            user-select: none;
+          ">
+            <div style="
+              display: inline-flex;
+              align-items: center;
+              gap: 4px;
+              background: #059669;
+              color: #ffffff;
+              font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              font-weight: 800;
+              font-size: 11px;
+              line-height: 1;
+              padding: 4px 7px 4px 6px;
+              border-radius: 6px;
+              border: 1.5px solid #ffffff;
+              box-shadow: 0 4px 10px rgba(5, 150, 105, 0.45);
+              white-space: nowrap;
+              z-index: 2;
+            ">
+              <span style="font-size: 10px;">🚩</span>
+              <span>START</span>
+            </div>
+            <!-- Sharp needle tip pointing directly at coordinate -->
+            <div style="
+              width: 0;
+              height: 0;
+              border-left: 5px solid transparent;
+              border-right: 5px solid transparent;
+              border-top: 7px solid #059669;
+              margin-top: -1px;
+              z-index: 1;
+              filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
+            "></div>
+          </div>
+        `,
+        iconSize: [66, 30],
+        iconAnchor: [33, 30],
+        popupAnchor: [0, -30],
+      });
+
+      if (!startMarkerRef.current) {
+        startMarkerRef.current = L.marker(startLatLng, {
+          icon: startIcon,
+          zIndexOffset: 600,
+        }).addTo(mapRef.current);
+        startMarkerRef.current.bindPopup(`
+          <div style="font-family: sans-serif; font-size: 12px; font-weight: bold; color: #059669; padding: 2px;">
+            🚩 START Pont (Indulás)
+          </div>
+        `);
+      } else {
+        startMarkerRef.current.setLatLng(startLatLng);
+        startMarkerRef.current.setIcon(startIcon);
+      }
+    } else if (startMarkerRef.current) {
+      mapRef.current.removeLayer(startMarkerRef.current);
+      startMarkerRef.current = null;
+    }
+
+    // Stop marker (Flag badge with sharp pointer tip at the end of track when not actively recording or session is stopped)
+    if (latLngs.length > 1 && !isTracking) {
+      const stopLatLng = latLngs[latLngs.length - 1];
+      const stopIcon = L.divIcon({
+        className: 'custom-stop-badge',
+        html: `
+          <div style="
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 62px;
+            cursor: pointer;
+            user-select: none;
+          ">
+            <div style="
+              display: inline-flex;
+              align-items: center;
+              gap: 4px;
+              background: #e11d48;
+              color: #ffffff;
+              font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              font-weight: 800;
+              font-size: 11px;
+              line-height: 1;
+              padding: 4px 7px 4px 6px;
+              border-radius: 6px;
+              border: 1.5px solid #ffffff;
+              box-shadow: 0 4px 10px rgba(225, 29, 72, 0.45);
+              white-space: nowrap;
+              z-index: 2;
+            ">
+              <span style="font-size: 10px;">🏁</span>
+              <span>STOP</span>
+            </div>
+            <!-- Sharp needle tip pointing directly at coordinate -->
+            <div style="
+              width: 0;
+              height: 0;
+              border-left: 5px solid transparent;
+              border-right: 5px solid transparent;
+              border-top: 7px solid #e11d48;
+              margin-top: -1px;
+              z-index: 1;
+              filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
+            "></div>
+          </div>
+        `,
+        iconSize: [62, 30],
+        iconAnchor: [31, 30],
+        popupAnchor: [0, -30],
+      });
+
+      if (!stopMarkerRef.current) {
+        stopMarkerRef.current = L.marker(stopLatLng, {
+          icon: stopIcon,
+          zIndexOffset: 600,
+        }).addTo(mapRef.current);
+        stopMarkerRef.current.bindPopup(`
+          <div style="font-family: sans-serif; font-size: 12px; font-weight: bold; color: #e11d48; padding: 2px;">
+            🏁 STOP Pont (Cél)
+          </div>
+        `);
+      } else {
+        stopMarkerRef.current.setLatLng(stopLatLng);
+        stopMarkerRef.current.setIcon(stopIcon);
+      }
+    } else if (stopMarkerRef.current) {
+      mapRef.current.removeLayer(stopMarkerRef.current);
+      stopMarkerRef.current = null;
+    }
+
+    // Current location marker with pulsing effect and sharp crosshair center
+    const activeLoc = currentLocation || (coordinates.length > 0 ? coordinates[coordinates.length - 1] : null);
+
+    if (activeLoc) {
+      const activeLatLng: [number, number] = [activeLoc.lat, activeLoc.lng];
+
+      const customIcon = L.divIcon({
+        className: 'custom-gps-icon',
+        html: `
+          <div style="position: relative; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;">
+            <div style="position: absolute; width: 28px; height: 28px; border-radius: 9999px; background: rgba(0, 96, 230, 0.28);" class="gps-pulse-marker"></div>
+            <div style="width: 14px; height: 14px; border-radius: 9999px; background: #0060e6; border: 2.5px solid #ffffff; box-shadow: 0 2px 6px rgba(0,0,0,0.4); z-index: 2;"></div>
+            <div style="position: absolute; width: 2px; height: 2px; border-radius: 9999px; background: #ffffff; z-index: 3;"></div>
+          </div>
+        `,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+        popupAnchor: [0, -14],
+      });
+
+      if (!currentMarkerRef.current) {
+        currentMarkerRef.current = L.marker(activeLatLng, { icon: customIcon }).addTo(mapRef.current);
+      } else {
+        currentMarkerRef.current.setLatLng(activeLatLng);
+        currentMarkerRef.current.setIcon(customIcon);
+      }
+
+      // If active tracking, smoothly center map on current position so the growing line is followed
+      if (isTracking && mapRef.current) {
+        mapRef.current.panTo(activeLatLng, { animate: true, duration: 0.4 });
+      } else if (mapRef.current && !hasInitialCenteredRef.current && currentLocation) {
+        // Automatically jump to current GPS position on startup
+        mapRef.current.setView(activeLatLng, 15, { animate: true });
+        hasInitialCenteredRef.current = true;
+      }
+    }
+
+    // Render Split (Résztáv) markers on the map with sharp pointy needle tip
+    if (!splitMarkersGroupRef.current && mapRef.current) {
+      splitMarkersGroupRef.current = L.layerGroup().addTo(mapRef.current);
+    }
+
+    if (splitMarkersGroupRef.current) {
+      splitMarkersGroupRef.current.clearLayers();
+      splitMarkersMapRef.current.clear();
+
+      if (splits && splits.length > 0) {
+        splits.forEach((split) => {
+          let splitLoc = split.coordinate;
+
+          // If no direct coordinate, find closest coordinate from coordinates array or position along path
+          if (!splitLoc && coordinates.length > 0) {
+            splitLoc = coordinates.find((c) => Math.abs(c.timestamp - split.timestamp) < 5000);
+            if (!splitLoc && split.splitIndex) {
+              const fraction = Math.min(1, split.splitIndex / Math.max(1, splits.length));
+              const idx = Math.min(coordinates.length - 1, Math.floor(fraction * (coordinates.length - 1)));
+              splitLoc = coordinates[idx];
+            }
+          }
+
+          if (splitLoc) {
+            const hasPhotos = split.photos && split.photos.length > 0;
+            const hasNotes = !!split.notes;
+            const splitBadgeWidth = split.name ? Math.min(110, 56 + split.name.length * 6) : 54;
+            const splitBadgeHeight = 30;
+            const displayName = split.name
+              ? (split.name.length > 10 ? split.name.slice(0, 9) + '…' : split.name)
+              : `#${split.formattedIndex || split.splitIndex}`;
+
+            const splitIcon = L.divIcon({
+              className: 'custom-split-badge',
+              html: `
+                <div style="
+                  position: relative;
+                  display: flex;
+                  flex-direction: column;
+                  align-items: center;
+                  width: ${splitBadgeWidth}px;
+                  cursor: pointer;
+                  user-select: none;
+                ">
+                  <div style="
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 3px;
+                    background: #0050cb;
+                    color: #ffffff;
+                    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    font-weight: 800;
+                    font-size: 11px;
+                    line-height: 1;
+                    padding: 4px 6px 4px 5px;
+                    border-radius: 6px;
+                    border: 1.5px solid #ffffff;
+                    box-shadow: 0 4px 10px rgba(0, 80, 203, 0.45);
+                    white-space: nowrap;
+                    z-index: 2;
+                    max-width: ${splitBadgeWidth}px;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                  ">
+                    <span style="font-size: 10px;">🚩</span>
+                    <span>${displayName}</span>
+                    ${hasPhotos ? '<span style="font-size: 9px;">📷</span>' : ''}
+                    ${hasNotes && !hasPhotos ? '<span style="font-size: 9px;">💬</span>' : ''}
+                  </div>
+                  <!-- Sharp needle tip pointing directly at coordinate -->
+                  <div style="
+                    width: 0;
+                    height: 0;
+                    border-left: 5px solid transparent;
+                    border-right: 5px solid transparent;
+                    border-top: 7px solid #0050cb;
+                    margin-top: -1px;
+                    z-index: 1;
+                    filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));
+                  "></div>
+                </div>
+              `,
+              iconSize: [splitBadgeWidth, splitBadgeHeight],
+              iconAnchor: [splitBadgeWidth / 2, splitBadgeHeight],
+              popupAnchor: [0, -splitBadgeHeight],
+            });
+
+            const splitMarker = L.marker([splitLoc.lat, splitLoc.lng], {
+              icon: splitIcon,
+              zIndexOffset: 500,
+            });
+
+            // Build photo preview HTML if available
+            let photoHtml = '';
+            if (split.photos && split.photos.length > 0) {
+              photoHtml = `
+                <div style="display: flex; gap: 4px; margin-top: 6px; overflow-x: auto; padding-bottom: 2px;">
+                  ${split.photos.slice(0, 3).map((p) => `<img src="${p}" style="width: 42px; height: 42px; object-fit: cover; border-radius: 6px; border: 1px solid #cbd5e1;" />`).join('')}
+                  ${split.photos.length > 3 ? `<div style="width: 42px; height: 42px; border-radius: 6px; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: #475569;">+${split.photos.length - 3}</div>` : ''}
+                </div>
+              `;
+            }
+
+            let notesHtml = '';
+            if (split.notes) {
+              notesHtml = `
+                <div style="color: #475569; font-size: 11px; margin-top: 4px; font-style: italic; background: #f1f5f9; padding: 3px 6px; border-radius: 4px; border-left: 2px solid #0050cb;">
+                  ${split.notes.length > 70 ? split.notes.slice(0, 68) + '…' : split.notes}
+                </div>
+              `;
+            }
+
+            splitMarker.bindPopup(`
+              <div style="font-family: sans-serif; font-size: 12px; line-height: 1.45; padding: 2px 4px; max-width: 200px;">
+                <div style="font-weight: 800; color: #0050cb; font-size: 13px; margin-bottom: 3px; display: flex; align-items: center; gap: 4px;">
+                  <span>🚩</span>
+                  <span>${split.name || `Résztáv #${split.formattedIndex || split.splitIndex}`}</span>
+                </div>
+                <div style="color: #334155;"><b>Távolság:</b> ${split.formattedDistance || split.distanceKm + ' km'}</div>
+                <div style="color: #334155;"><b>Részidő:</b> ${split.formattedTime}</div>
+                ${split.totalDistanceKm ? `<div style="color: #64748b; font-size: 11px; margin-top: 2px;">Össz. táv: ${split.totalDistanceKm.toFixed(2)} km</div>` : ''}
+                ${notesHtml}
+                ${photoHtml}
+              </div>
+            `);
+
+            if (onSelectSplit) {
+              splitMarker.on('click', () => {
+                onSelectSplit(split);
+              });
+            }
+
+            splitMarkersGroupRef.current?.addLayer(splitMarker);
+            splitMarkersMapRef.current.set(split.id, splitMarker);
+          }
+        });
+      }
+    }
+  }, [coordinates, currentLocation, isTracking, splits, onSelectSplit]);
+
+  // Handle zooming to focused split marker
+  useEffect(() => {
+    if (!mapRef.current || !focusedSplitId) return;
+
+    const marker = splitMarkersMapRef.current.get(focusedSplitId);
+    if (marker) {
+      const latLng = marker.getLatLng();
+      mapRef.current.flyTo(latLng, 17, { animate: true, duration: 0.8 });
+      setTimeout(() => {
+        marker.openPopup();
+      }, 400);
+    } else if (splits && splits.length > 0) {
+      const targetSplit = splits.find((s) => s.id === focusedSplitId);
+      if (targetSplit?.coordinate) {
+        mapRef.current.flyTo([targetSplit.coordinate.lat, targetSplit.coordinate.lng], 17, {
+          animate: true,
+          duration: 0.8,
+        });
+      }
+    }
+  }, [focusedSplitId, splits]);
+
+  const handleRecenterClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!mapRef.current) return;
+
+    const targetPos = currentLocation
+      ? [currentLocation.lat, currentLocation.lng]
+      : coordinates.length > 0
+      ? [coordinates[coordinates.length - 1].lat, coordinates[coordinates.length - 1].lng]
+      : [37.7775, -122.4164];
+
+    mapRef.current.setView(targetPos as [number, number], 15, { animate: true });
+
+    if (onRecenter) {
+      onRecenter();
+    }
+  };
+
+  const handleZoomIn = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (mapRef.current) {
+      mapRef.current.zoomIn();
+    }
+  };
+
+  const handleZoomOut = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (mapRef.current) {
+      mapRef.current.zoomOut();
+    }
+  };
+
+  const handleSelectLayer = (layerKey: MapLayerType) => {
+    setInternalLayer(layerKey);
+    setShowLayersMenu(false);
+    if (onLayerChange) {
+      onLayerChange(layerKey);
+    }
+  };
+
+  const layersList: { key: MapLayerType; name: string; desc: string }[] = [
+    { key: 'osm', name: 'OpenStreetMap', desc: 'Alapértelmezett' },
+    { key: 'voyager', name: 'Carto Voyager', desc: 'Színes & Részletes' },
+    { key: 'positron', name: 'Positron Light', desc: 'Letisztult világos' },
+    { key: 'cyclosm', name: 'CyclOSM', desc: 'Kerékpár & Terep' },
+    { key: 'satellite', name: 'Esri Műhold', desc: 'Műholdkép' },
+  ];
+
+  return (
+    <div className={`relative w-full h-full overflow-hidden ${className}`}>
+      {/* Leaflet Map Div */}
+      <div ref={mapContainerRef} className="w-full h-full z-0" />
+
+      {/* Layer selector button & menu (Top Right) */}
+      {showLayerSelector && (
+        <div className="absolute top-2.5 right-2.5 z-20">
+          <button
+            id="btn-map-layer-selector"
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowLayersMenu(!showLayersMenu);
+            }}
+            className="w-8 h-8 bg-white/95 hover:bg-white text-slate-700 hover:text-[#0050cb] rounded-xl shadow-md flex items-center justify-center border border-slate-200/80 active:scale-95 transition-all cursor-pointer"
+            title="Térképréteg váltása"
+          >
+            <Layers className="w-4 h-4" />
+          </button>
+
+          {showLayersMenu && (
+            <>
+              {/* Invisible backdrop to dismiss when clicking elsewhere */}
+              <div
+                className="fixed inset-0 z-20 cursor-default"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowLayersMenu(false);
+                }}
+              />
+              <div
+                className="absolute right-0 top-10 bg-white rounded-2xl shadow-xl border border-slate-200/90 py-1.5 px-1.5 w-[175px] max-h-[125px] sm:max-h-[150px] overflow-y-auto overscroll-contain flex flex-col gap-1 text-xs z-30 animate-in fade-in zoom-in-95 duration-100 custom-scrollbar"
+                onClick={(e) => e.stopPropagation()}
+                onWheel={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()}
+                onTouchMove={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+              >
+                <div className="sticky top-0 bg-white px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 mb-0.5 z-10">
+                  Térképréteg
+                </div>
+                {layersList.map((item) => {
+                  const isActive = internalLayer === item.key;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => handleSelectLayer(item.key)}
+                      className={`flex items-center justify-between w-full text-left px-2 py-1.5 rounded-xl transition-colors cursor-pointer shrink-0 ${
+                        isActive
+                          ? 'bg-[#eaf2ff] text-[#0050cb] font-bold'
+                          : 'hover:bg-slate-50 text-slate-700 font-medium'
+                      }`}
+                    >
+                      <div className="min-w-0 pr-1">
+                        <div className="leading-tight truncate text-[11.5px]">{item.name}</div>
+                        <div className="text-[9.5px] text-slate-400 font-normal truncate">{item.desc}</div>
+                      </div>
+                      {isActive && <Check className="w-3.5 h-3.5 text-[#0050cb] stroke-[2.5] shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Zoom Controls (Top Left) */}
+      {showZoomControls && (
+        <div className="absolute top-2.5 left-2.5 z-10 flex flex-col bg-white/95 rounded-xl shadow-md border border-slate-200/80 overflow-hidden">
+          <button
+            id="btn-map-zoom-in"
+            type="button"
+            onClick={handleZoomIn}
+            title="Nagyítás (+)"
+            className="w-8 h-8 flex items-center justify-center text-slate-700 hover:text-[#0050cb] hover:bg-slate-50 active:bg-slate-100 transition-colors border-b border-slate-100 cursor-pointer"
+          >
+            <Plus className="w-4 h-4 stroke-[2.5]" />
+          </button>
+          <button
+            id="btn-map-zoom-out"
+            type="button"
+            onClick={handleZoomOut}
+            title="Kicsinyítés (-)"
+            className="w-8 h-8 flex items-center justify-center text-slate-700 hover:text-[#0050cb] hover:bg-slate-50 active:bg-slate-100 transition-colors cursor-pointer"
+          >
+            <Minus className="w-4 h-4 stroke-[2.5]" />
+          </button>
+        </div>
+      )}
+
+      {/* Crosshair / Recenter Button (Bottom Right) */}
+      <button
+        id="btn-recenter-map"
+        type="button"
+        onClick={handleRecenterClick}
+        title="Centrálás jelenlegi helyre"
+        className="absolute bottom-2.5 right-2.5 z-10 w-8 h-8 bg-white/95 hover:bg-white text-slate-700 hover:text-[#0050cb] rounded-xl shadow-md flex items-center justify-center border border-slate-200/80 active:scale-90 transition-transform cursor-pointer"
+      >
+        <Crosshair className="w-4 h-4 text-slate-700 hover:text-[#0050cb]" />
+      </button>
+    </div>
+  );
+};
+
