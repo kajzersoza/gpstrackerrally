@@ -394,6 +394,10 @@ export interface ReferenceTrackMetrics {
   distanceToEndKm: number;
   distanceToEndMeters: number;
   formattedDistanceToEnd: string; // e.g. "-3.42 km" or "-3 420 m"
+  userTrackDistKm: number;
+  totalTrackKm: number;
+  isOnTrack: boolean; // within ~100m corridor of the track
+  activeSplitIndex: number; // 0-based index of current active / upcoming split
   nextSplit: {
     split: Split;
     index: number;
@@ -401,18 +405,22 @@ export interface ReferenceTrackMetrics {
     name: string;
     distanceKm: number;
     distanceMeters: number;
-    formattedRelative: string; // e.g. "-352 m"
+    formattedRelative: string; // e.g. "-352 m" or "+120 m"
     bearingDeg: number;
     bearingCompass: string;
     isReached: boolean;
+    isPassed: boolean;
   } | null;
   splitsProgress: Array<{
     split: Split;
     distanceMeters: number;
+    absDistanceMeters: number;
     formattedDistance: string;
     formattedRelative: string;
     isReached: boolean;
+    isPassed: boolean;
     bearingCompass: string;
+    alongTrackDistKm: number;
   }>;
   closestCoordinate: Coordinate | null;
   crossTrackDistanceMeters: number;
@@ -511,6 +519,8 @@ export function getFullSessionSplits(session: ActivitySession): Split[] {
 
 /**
  * Calculates dynamic metrics relative to a loaded reference track
+ * When the user is within ~100 meters of the track, calculates cumulative along-track distances.
+ * Signs: "-" when approaching an upcoming point, "+" after passing/leaving a point.
  */
 export function calculateReferenceMetrics(
   currentLoc: Coordinate | null,
@@ -520,111 +530,200 @@ export function calculateReferenceMetrics(
   const coords = referenceSession.coordinates;
   if (!coords || coords.length === 0) return null;
 
-  const startCoord = coords[0];
-  const endCoord = coords[coords.length - 1];
+  const activePos = currentLoc || coords[0];
 
-  const activePos = currentLoc || startCoord;
+  // 1. Precalculate cumulative path distances along reference track coordinates
+  const cumDist: number[] = new Array(coords.length);
+  cumDist[0] = 0;
+  for (let i = 1; i < coords.length; i++) {
+    cumDist[i] = cumDist[i - 1] + calculateDistance(coords[i - 1].lat, coords[i - 1].lng, coords[i].lat, coords[i].lng);
+  }
+  const totalTrackKm = cumDist[coords.length - 1] || referenceSession.totalDistanceKm || 0;
 
-  // Distance from reference Start
-  const distFromStartKm = calculateDistance(startCoord.lat, startCoord.lng, activePos.lat, activePos.lng);
-  const distFromStartMeters = Math.round(distFromStartKm * 1000);
-  const formattedStartObj = formatDistanceByUnit(distFromStartKm, unit);
-  const formattedDistanceFromStart = `+${formattedStartObj.value} ${formattedStartObj.unitLabel}`;
-
-  // Distance to reference End/Stop
-  const distToEndKm = calculateDistance(activePos.lat, activePos.lng, endCoord.lat, endCoord.lng);
-  const distToEndMeters = Math.round(distToEndKm * 1000);
-  const formattedEndObj = formatDistanceByUnit(distToEndKm, unit);
-  const formattedDistanceToEnd = `-${formattedEndObj.value} ${formattedEndObj.unitLabel}`;
-
-  // Find closest coordinate along the reference path
-  let minDistanceToPath = Infinity;
+  // 2. Find closest coordinate & perpendicular segment projection along the track
+  let minDistanceToPathKm = Infinity;
   let closestCoord: Coordinate = coords[0];
   let closestIndex = 0;
+  let userTrackDistKm = 0;
 
   for (let i = 0; i < coords.length; i++) {
     const d = calculateDistance(activePos.lat, activePos.lng, coords[i].lat, coords[i].lng);
-    if (d < minDistanceToPath) {
-      minDistanceToPath = d;
+    if (d < minDistanceToPathKm) {
+      minDistanceToPathKm = d;
       closestCoord = coords[i];
       closestIndex = i;
     }
   }
 
-  const crossTrackDistanceMeters = Math.round(minDistanceToPath * 1000);
-  const progressPercent = Math.min(100, Math.max(0, Math.round((closestIndex / Math.max(1, coords.length - 1)) * 100)));
+  userTrackDistKm = cumDist[closestIndex];
 
-  // Calculate splits progress using the full sequence including Start and Stop
+  // Refine user position along track with segment projection if multi-point
+  if (coords.length > 1) {
+    const checkSegments: Array<[number, number]> = [];
+    if (closestIndex > 0) checkSegments.push([closestIndex - 1, closestIndex]);
+    if (closestIndex < coords.length - 1) checkSegments.push([closestIndex, closestIndex + 1]);
+
+    for (const [i1, i2] of checkSegments) {
+      const p1 = coords[i1];
+      const p2 = coords[i2];
+      const segLenKm = cumDist[i2] - cumDist[i1];
+      if (segLenKm > 0.0001) {
+        const cosLat = Math.cos((deg2rad(p1.lat + p2.lat) / 2));
+        const dx = (p2.lng - p1.lng) * cosLat;
+        const dy = p2.lat - p1.lat;
+        const segLenSq = dx * dx + dy * dy;
+        if (segLenSq > 0) {
+          const u = ((activePos.lng - p1.lng) * cosLat * dx + (activePos.lat - p1.lat) * dy) / segLenSq;
+          const clampedU = Math.max(0, Math.min(1, u));
+          const projDistKm = cumDist[i1] + clampedU * segLenKm;
+          const projLat = p1.lat + clampedU * (p2.lat - p1.lat);
+          const projLng = p1.lng + clampedU * (p2.lng - p1.lng);
+          const dProj = calculateDistance(activePos.lat, activePos.lng, projLat, projLng);
+          if (dProj <= minDistanceToPathKm) {
+            minDistanceToPathKm = dProj;
+            closestCoord = { ...coords[closestIndex], lat: projLat, lng: projLng };
+            userTrackDistKm = projDistKm;
+          }
+        }
+      }
+    }
+  }
+
+  const crossTrackDistanceMeters = Math.round(minDistanceToPathKm * 1000);
+  const isOnTrack = crossTrackDistanceMeters <= 100; // within ~100m corridor
+
+  // 3. Elapsed distance along track from Start (+) and Remaining to End (-)
+  const distanceFromStartKm = userTrackDistKm;
+  const distFromStartMeters = Math.round(distanceFromStartKm * 1000);
+  const formattedStartObj = formatDistanceByUnit(distanceFromStartKm, unit);
+  const formattedDistanceFromStart = `+${formattedStartObj.value} ${formattedStartObj.unitLabel}`;
+
+  const distanceToEndKm = Math.max(0, totalTrackKm - userTrackDistKm);
+  const distToEndMeters = Math.round(distanceToEndKm * 1000);
+  const formattedEndObj = formatDistanceByUnit(distanceToEndKm, unit);
+  const formattedDistanceToEnd = `-${formattedEndObj.value} ${formattedEndObj.unitLabel}`;
+
+  const progressPercent = totalTrackKm > 0
+    ? Math.min(100, Math.max(0, Math.round((userTrackDistKm / totalTrackKm) * 100)))
+    : 0;
+
+  // 4. Calculate full checkpoints sequence (Start, intermediate splits, Stop)
   const sortedSplits = getFullSessionSplits(referenceSession);
 
-  const PROXIMITY_THRESHOLD_METERS = 35; // within 35 meters is considered reached
-  let nextSplitObj: ReferenceTrackMetrics['nextSplit'] = null;
-
+  // Map each split to its along-track distance
   const splitsProgress = sortedSplits.map((split, idx) => {
-    let splitCoord = split.coordinate;
-    if (!splitCoord) {
-      // Find approximate coordinate from reference track coordinates
-      const fraction = (idx + 1) / Math.max(1, sortedSplits.length);
-      const cIdx = Math.min(coords.length - 1, Math.floor(fraction * (coords.length - 1)));
-      splitCoord = coords[cIdx];
+    let alongTrackDistKm = 0;
+    const isStart = split.id.startsWith('start') || split.splitIndex === 0 || split.formattedIndex === 'START';
+    const isStop = split.id.startsWith('stop') || split.formattedIndex === 'CÉL';
+
+    if (isStart) {
+      alongTrackDistKm = 0;
+    } else if (isStop) {
+      alongTrackDistKm = totalTrackKm;
+    } else if (typeof split.totalDistanceKm === 'number' && split.totalDistanceKm > 0 && split.totalDistanceKm <= totalTrackKm * 1.05) {
+      alongTrackDistKm = split.totalDistanceKm;
+    } else {
+      let splitCoord = split.coordinate;
+      if (!splitCoord) {
+        const frac = (idx + 1) / Math.max(1, sortedSplits.length);
+        const cIdx = Math.min(coords.length - 1, Math.floor(frac * (coords.length - 1)));
+        splitCoord = coords[cIdx];
+      }
+      let minD = Infinity;
+      let bestIdx = 0;
+      for (let i = 0; i < coords.length; i++) {
+        const d = calculateDistance(splitCoord.lat, splitCoord.lng, coords[i].lat, coords[i].lng);
+        if (d < minD) {
+          minD = d;
+          bestIdx = i;
+        }
+      }
+      alongTrackDistKm = cumDist[bestIdx];
     }
 
-    const distKm = splitCoord
-      ? calculateDistance(activePos.lat, activePos.lng, splitCoord.lat, splitCoord.lng)
-      : 0;
-    const distMeters = Math.round(distKm * 1000);
+    // Relative difference along the track:
+    // diffKm > 0: user is before this split (approaching along track) -> "-"
+    // diffKm < 0: user has passed this split (passed/left along track) -> "+"
+    const diffKm = alongTrackDistKm - userTrackDistKm;
+    const diffMeters = Math.round(diffKm * 1000);
+    const absDiffKm = Math.abs(diffKm);
+    const absDiffMeters = Math.abs(diffMeters);
+
+    const isPassed = diffKm < -0.015; // passed by more than 15 meters along the track
+    const isApproaching = diffKm > 0.015; // approaching by more than 15 meters
+    const isAtPoint = absDiffMeters <= 15;
+
+    const formattedObj = formatDistanceByUnit(absDiffKm, unit);
+    let formattedRelative = '';
+    if (isApproaching) {
+      // Közeledünk a ponthoz, még nem hagytuk el -> "-"
+      formattedRelative = `-${formattedObj.value} ${formattedObj.unitLabel}`;
+    } else if (isPassed) {
+      // Elhagytuk a pontot -> "+"
+      formattedRelative = `+${formattedObj.value} ${formattedObj.unitLabel}`;
+    } else {
+      // Pontosan a pontnál vagyunk
+      formattedRelative = `0 ${formattedObj.unitLabel}`;
+    }
+
+    const splitCoord = split.coordinate || (closestIndex < coords.length ? coords[closestIndex] : coords[0]);
     const bearingDeg = splitCoord ? calculateBearing(activePos.lat, activePos.lng, splitCoord.lat, splitCoord.lng) : 0;
     const bearingCompass = getCompassDirection(bearingDeg);
 
-    // Is it reached? If user is past this split's position or within threshold
-    const isReached = distMeters <= PROXIMITY_THRESHOLD_METERS;
-
-    // Formatting for display: e.g. "-352 m" if not reached
-    const relObj = formatDistanceByUnit(distKm, unit);
-    const formattedRelative = isReached ? '✓ Érintve' : `-${relObj.value} ${relObj.unitLabel}`;
-
     return {
       split,
-      distanceMeters: distMeters,
-      formattedDistance: `${relObj.value} ${relObj.unitLabel}`,
+      distanceMeters: diffMeters,
+      absDistanceMeters: absDiffMeters,
+      formattedDistance: `${formattedObj.value} ${formattedObj.unitLabel}`,
       formattedRelative,
-      isReached,
+      isReached: isPassed || isAtPoint,
+      isPassed,
       bearingCompass,
+      alongTrackDistKm,
     };
   });
 
-  // Identify next unreached split
-  const firstUnreached = splitsProgress.find((sp) => !sp.isReached);
-  if (firstUnreached) {
-    const split = firstUnreached.split;
+  // Find the active split index (the first upcoming split not yet passed)
+  let activeSplitIndex = splitsProgress.findIndex((sp) => !sp.isPassed);
+  if (activeSplitIndex === -1) {
+    activeSplitIndex = Math.max(0, splitsProgress.length - 1);
+  }
+
+  const activeSp = splitsProgress[activeSplitIndex];
+  let nextSplitObj: ReferenceTrackMetrics['nextSplit'] = null;
+
+  if (activeSp) {
+    const split = activeSp.split;
     const splitCoord = split.coordinate || closestCoord;
-    const distKm = calculateDistance(activePos.lat, activePos.lng, splitCoord.lat, splitCoord.lng);
-    const distMeters = Math.round(distKm * 1000);
-    const bearingDeg = calculateBearing(activePos.lat, activePos.lng, splitCoord.lat, splitCoord.lng);
+    const bearingDeg = splitCoord ? calculateBearing(activePos.lat, activePos.lng, splitCoord.lat, splitCoord.lng) : 0;
     const bearingCompass = getCompassDirection(bearingDeg);
-    const relObj = formatDistanceByUnit(distKm, unit);
 
     nextSplitObj = {
       split,
-      index: split.splitIndex || (sortedSplits.indexOf(split) + 1),
+      index: split.splitIndex || (activeSplitIndex + 1),
       total: sortedSplits.length,
-      name: split.name || `#${split.formattedIndex || split.splitIndex}`,
-      distanceKm: distKm,
-      distanceMeters: distMeters,
-      formattedRelative: `-${relObj.value} ${relObj.unitLabel}`,
+      name: split.name || (split.id.startsWith('start') ? 'START' : split.id.startsWith('stop') ? 'CÉL' : `#${split.formattedIndex || activeSplitIndex}`),
+      distanceKm: activeSp.absDistanceMeters / 1000,
+      distanceMeters: activeSp.absDistanceMeters,
+      formattedRelative: activeSp.formattedRelative,
       bearingDeg,
       bearingCompass,
-      isReached: false,
+      isReached: activeSp.isReached,
+      isPassed: activeSp.isPassed,
     };
   }
 
   return {
-    distanceFromStartKm: distFromStartKm,
+    distanceFromStartKm,
     distanceFromStartMeters: distFromStartMeters,
     formattedDistanceFromStart,
-    distanceToEndKm: distToEndKm,
+    distanceToEndKm,
     distanceToEndMeters: distToEndMeters,
     formattedDistanceToEnd,
+    userTrackDistKm,
+    totalTrackKm,
+    isOnTrack,
+    activeSplitIndex,
     nextSplit: nextSplitObj,
     splitsProgress,
     closestCoordinate: closestCoord,

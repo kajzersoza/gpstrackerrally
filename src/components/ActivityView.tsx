@@ -95,17 +95,18 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
   onUpdateSettings,
   onExportGPX,
 }) => {
-  const splitsContainerRef = useRef<HTMLDivElement>(null);
+  const desktopSplitsContainerRef = useRef<HTMLDivElement>(null);
+  const mobileSplitsContainerRef = useRef<HTMLDivElement>(null);
   const [focusedSplitId, setFocusedSplitId] = useState<string | null>(null);
   const [editingSplit, setEditingSplit] = useState<Split | null>(null);
   const [splitsTab, setSplitsTab] = useState<'active' | 'loaded'>('active');
 
-  // Auto scroll to top of splits when new split is added
+  // If a reference session is loaded, default to 'loaded' tab to inspect track points immediately
   useEffect(() => {
-    if (splitsContainerRef.current) {
-      splitsContainerRef.current.scrollTop = 0;
+    if (loadedSession) {
+      setSplitsTab('loaded');
     }
-  }, [splits.length]);
+  }, [loadedSession?.id]);
 
   // Compute active DMS coordinates
   const activeLat = currentLocation?.lat ?? (coordinates.length > 0 ? coordinates[coordinates.length - 1].lat : (loadedSession?.coordinates[0]?.lat ?? 37.777528));
@@ -123,7 +124,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
   // Display distance formatted according to selected unit (km, m, mi)
   const formattedDistanceObj = formatDistanceByUnit(totalDistanceKm, settings.unit);
 
-  // Compute reference track relative metrics
+  // Compute reference track relative metrics along track corridor
   const referenceMetrics: ReferenceTrackMetrics | null = useMemo(() => {
     if (!loadedSession) return null;
     return calculateReferenceMetrics(currentLocation, loadedSession, settings.unit);
@@ -133,6 +134,54 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
     if (!loadedSession) return undefined;
     return getFullSessionSplits(loadedSession);
   }, [loadedSession]);
+
+  // Auto-scroll loaded checkpoints list so that the current active/closest point is always the 3rd item in view
+  const activeSplitIndex = referenceMetrics?.activeSplitIndex ?? 0;
+
+  useEffect(() => {
+    if (!referenceMetrics || splitsTab !== 'loaded') return;
+
+    // Target item to align to the top so active item is 3rd (slot index 2)
+    const targetTopIndex = Math.max(0, activeSplitIndex - 2);
+
+    // Desktop auto-scroll
+    if (desktopSplitsContainerRef.current) {
+      const targetEl = desktopSplitsContainerRef.current.querySelector<HTMLElement>(`#desktop-ref-split-${targetTopIndex}`);
+      if (targetEl) {
+        const containerTop = desktopSplitsContainerRef.current.getBoundingClientRect().top;
+        const elTop = targetEl.getBoundingClientRect().top;
+        const currentScroll = desktopSplitsContainerRef.current.scrollTop;
+        desktopSplitsContainerRef.current.scrollTo({
+          top: Math.max(0, currentScroll + (elTop - containerTop)),
+          behavior: 'smooth',
+        });
+      }
+    }
+
+    // Mobile auto-scroll
+    if (mobileSplitsContainerRef.current) {
+      const targetEl = mobileSplitsContainerRef.current.querySelector<HTMLElement>(`#mobile-ref-split-${targetTopIndex}`);
+      if (targetEl) {
+        const containerTop = mobileSplitsContainerRef.current.getBoundingClientRect().top;
+        const elTop = targetEl.getBoundingClientRect().top;
+        const currentScroll = mobileSplitsContainerRef.current.scrollTop;
+        mobileSplitsContainerRef.current.scrollTo({
+          top: Math.max(0, currentScroll + (elTop - containerTop)),
+          behavior: 'smooth',
+        });
+      }
+    }
+  }, [activeSplitIndex, splitsTab, referenceMetrics]);
+
+  // Auto scroll to top of live splits when new split is added
+  useEffect(() => {
+    if (desktopSplitsContainerRef.current && splitsTab === 'active') {
+      desktopSplitsContainerRef.current.scrollTop = 0;
+    }
+    if (mobileSplitsContainerRef.current && splitsTab === 'active') {
+      mobileSplitsContainerRef.current.scrollTop = 0;
+    }
+  }, [splits.length, splitsTab]);
 
   const getActivityIcon = (mode: ActivityMode) => {
     switch (mode) {
@@ -598,7 +647,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
             </div>
 
             <div
-              ref={splitsContainerRef}
+              ref={desktopSplitsContainerRef}
               className="flex-1 overflow-y-auto min-h-0 space-y-2 mt-2 pr-1 custom-scrollbar pb-1"
             >
               {/* Tab 1: Active Live Splits */}
@@ -731,11 +780,11 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                 </>
               )}
 
-              {/* Tab 2: Loaded Track Waypoints with Dynamic Relative Distance */}
+              {/* Tab 2: Loaded Track Waypoints with Dynamic Relative Distance along track */}
               {splitsTab === 'loaded' && referenceMetrics && (
                 <div className="space-y-2">
                   {referenceMetrics.splitsProgress.map((sp, idx) => {
-                    const isNext = referenceMetrics.nextSplit?.split.id === sp.split.id;
+                    const isActivePoint = referenceMetrics.activeSplitIndex === idx;
                     const isFocused = focusedSplitId === sp.split.id;
                     const isStart = sp.split.id.startsWith('start') || sp.split.splitIndex === 0 || sp.split.formattedIndex === 'START';
                     const isStop = sp.split.id.startsWith('stop') || sp.split.formattedIndex === 'CÉL';
@@ -744,13 +793,14 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
 
                     return (
                       <div
+                        id={`desktop-ref-split-${idx}`}
                         key={sp.split.id || idx}
                         onClick={() => setFocusedSplitId(sp.split.id === focusedSplitId ? null : sp.split.id)}
                         className={`rounded-2xl p-3 border-l-4 shadow-2xs flex flex-col gap-1.5 transition-all cursor-pointer ${
-                          isNext
-                            ? 'bg-purple-100/95 border-l-purple-600 ring-2 ring-purple-500/40 shadow-sm scale-[1.01]'
-                            : sp.isReached
-                            ? 'bg-emerald-50/70 border-l-emerald-500'
+                          isActivePoint
+                            ? 'bg-purple-100/95 border-l-purple-600 ring-2 ring-purple-500/50 shadow-md scale-[1.01]'
+                            : sp.isPassed
+                            ? 'bg-emerald-50/70 border-l-emerald-500 hover:bg-emerald-50'
                             : isFocused
                             ? isStart
                               ? 'bg-emerald-100/80 border-l-emerald-600 ring-1 ring-emerald-400'
@@ -772,21 +822,26 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                                   ? 'bg-emerald-600 text-white'
                                   : isStop
                                   ? 'bg-rose-600 text-white'
-                                  : isNext
+                                  : isActivePoint
                                   ? 'bg-purple-700 text-white'
-                                  : sp.isReached
+                                  : sp.isPassed
                                   ? 'bg-emerald-500 text-white'
                                   : 'bg-slate-200 text-slate-700'
                               }`}
                             >
-                              {isStart ? '🚩 START' : isStop ? '🏁 CÉL' : sp.isReached ? '✓' : `#${sp.split.formattedIndex || idx}`}
+                              {isStart ? '🚩 START' : isStop ? '🏁 CÉL' : sp.isPassed ? '✓' : `#${sp.split.formattedIndex || idx}`}
                             </span>
                             <div className="min-w-0">
                               <div className="text-xs font-black text-slate-800 truncate font-heading flex items-center gap-1.5">
                                 <span>{sp.split.name || (isStart ? 'Kezdőpont' : isStop ? 'Cél / Végpont' : `Ellenőrzőpont #${idx}`)}</span>
-                                {isNext && (
-                                  <span className="text-[9.5px] uppercase bg-purple-600 text-white font-extrabold px-1.5 py-0.2 rounded-md">
-                                    Következő
+                                {isActivePoint && (
+                                  <span className="text-[9px] uppercase bg-purple-600 text-white font-extrabold px-1.5 py-0.5 rounded-md shadow-2xs">
+                                    🎯 Aktuális (3. a listában)
+                                  </span>
+                                )}
+                                {sp.isPassed && !isActivePoint && (
+                                  <span className="text-[9px] uppercase bg-emerald-100 text-emerald-700 font-bold px-1.5 py-0.5 rounded-md">
+                                    ✓ Elhagyva
                                   </span>
                                 )}
                               </div>
@@ -796,7 +851,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                                     ? '0.00 km (Startvonal)'
                                     : isStop
                                     ? `Célvonal (${sp.split.formattedDistance || `${sp.split.distanceKm} km`})`
-                                    : `Táv az útvonalon: ${sp.split.formattedDistance || `${sp.split.distanceKm} km`}`}
+                                    : `Nyomvonal pozíció: ${sp.split.formattedDistance || `${sp.split.distanceKm} km`}`}
                                 </span>
                               </div>
                             </div>
@@ -804,11 +859,17 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
 
                           <div className="flex items-center gap-2 flex-shrink-0">
                             <div className="flex flex-col items-end">
-                              <span className={`text-sm font-black font-heading ${isNext ? 'text-purple-700 font-mono text-base' : sp.isReached ? 'text-emerald-600' : 'text-slate-600'}`}>
+                              <span className={`text-sm font-black font-heading font-mono ${
+                                isActivePoint
+                                  ? 'text-purple-700 text-base'
+                                  : sp.isPassed
+                                  ? 'text-emerald-600'
+                                  : 'text-slate-700'
+                              }`}>
                                 {sp.formattedRelative}
                               </span>
                               <span className="text-[10px] text-slate-400 font-mono">
-                                Irányszög: {sp.bearingCompass}
+                                Irány: {sp.bearingCompass}
                               </span>
                             </div>
 
@@ -1027,11 +1088,43 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
 
         {/* 4. Mobile Scrollable Splits */}
         <section className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
+          {/* Mobile Split Tabs if loaded session exists */}
+          {loadedSession && (
+            <div className="flex items-center gap-1.5 pb-1.5 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setSplitsTab('loaded')}
+                className={`text-[11px] font-black uppercase tracking-wider font-heading flex items-center gap-1 px-2 py-0.5 rounded-lg transition-all ${
+                  splitsTab === 'loaded'
+                    ? 'bg-purple-100 text-purple-700 shadow-2xs font-extrabold'
+                    : 'text-slate-400 hover:text-slate-700'
+                }`}
+              >
+                <Target className="w-3 h-3 text-purple-600" />
+                <span>Betöltött ({referenceMetrics?.splitsProgress.length || loadedSessionSplits?.length || 0})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSplitsTab('active')}
+                className={`text-[11px] font-black uppercase tracking-wider font-heading flex items-center gap-1 px-2 py-0.5 rounded-lg transition-all ${
+                  splitsTab === 'active'
+                    ? 'bg-blue-100 text-[#0050cb] shadow-2xs font-extrabold'
+                    : 'text-slate-400 hover:text-slate-700'
+                }`}
+              >
+                <Flag className="w-3 h-3 text-[#0060e6]" />
+                <span>Rögzített ({splits.length})</span>
+              </button>
+            </div>
+          )}
+
           <div
-            ref={splitsContainerRef}
+            ref={mobileSplitsContainerRef}
             className="flex-1 overflow-y-auto min-h-0 space-y-1.5 pr-0.5 custom-scrollbar pb-1"
           >
-            {trackingStatus !== 'idle' && (
+            {/* Live split in progress (if active tab & tracking) */}
+            {splitsTab === 'active' && trackingStatus !== 'idle' && (
               <div className="bg-[#f0f6ff] rounded-2xl p-2 border-2 border-dashed border-[#0060e6]/40 shadow-sm flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <div className="relative flex items-center justify-center w-7 h-7 select-none">
@@ -1059,7 +1152,8 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
               </div>
             )}
 
-            {splits.length === 0 && trackingStatus === 'idle' && (!loadedSession || !referenceMetrics) ? (
+            {/* Empty state for active splits */}
+            {splitsTab === 'active' && splits.length === 0 && trackingStatus === 'idle' ? (
               <div className="h-full flex flex-col items-center justify-center p-3 text-center text-slate-400 bg-white/60 rounded-2xl border border-dashed border-slate-200">
                 <p className="text-xs font-medium text-slate-500">
                   Nincsenek rögzített résztávok.
@@ -1068,7 +1162,8 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                   Kattints a <strong className="text-[#0060e6]">Start</strong> gombra a GPS követés megkezdéséhez!
                 </p>
               </div>
-            ) : splits.length > 0 ? (
+            ) : splitsTab === 'active' ? (
+              /* Active recorded splits on mobile */
               splits.map((split) => {
                 const formattedSplitDist = formatDistanceByUnit(split.distanceKm, settings.unit);
                 const totalKm = getCumulativeDistanceForSplit(split, splits);
@@ -1125,13 +1220,31 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                         </button>
                       </div>
                     </div>
+
+                    {(hasNotes || hasPhotos) && (
+                      <div className="flex items-center gap-2 pl-7 text-[10.5px]">
+                        {hasNotes && (
+                          <div className="flex items-center gap-1 text-slate-600 truncate max-w-[190px]">
+                            <MessageSquare className="w-2.5 h-2.5 text-[#0050cb] flex-shrink-0" />
+                            <span className="truncate">{split.notes}</span>
+                          </div>
+                        )}
+                        {hasPhotos && (
+                          <div className="flex items-center gap-1 text-[#0050cb] font-bold">
+                            <Camera className="w-2.5 h-2.5 flex-shrink-0" />
+                            <span>{split.photos!.length} fotó</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })
-            ) : loadedSession && referenceMetrics ? (
-              /* If no live splits yet but track is loaded, show loaded track checkpoints on mobile */
+            ) : splitsTab === 'loaded' && referenceMetrics ? (
+              /* Loaded Reference Track Waypoints on Mobile with 3rd-Item Follow-Along Positioning */
               referenceMetrics.splitsProgress.map((sp, idx) => {
-                const isNext = referenceMetrics.nextSplit?.split.id === sp.split.id;
+                const isActivePoint = referenceMetrics.activeSplitIndex === idx;
+                const isFocused = focusedSplitId === sp.split.id;
                 const isStart = sp.split.id.startsWith('start') || sp.split.splitIndex === 0 || sp.split.formattedIndex === 'START';
                 const isStop = sp.split.id.startsWith('stop') || sp.split.formattedIndex === 'CÉL';
                 const hasNotes = !!sp.split.notes;
@@ -1139,41 +1252,55 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
 
                 return (
                   <div
+                    id={`mobile-ref-split-${idx}`}
                     key={sp.split.id || idx}
                     onClick={() => setFocusedSplitId(sp.split.id === focusedSplitId ? null : sp.split.id)}
                     className={`rounded-xl p-2.5 border-l-4 shadow-2xs flex flex-col gap-1 transition-all ${
-                      isNext
-                        ? 'bg-purple-100 border-l-purple-600 ring-1 ring-purple-400'
+                      isActivePoint
+                        ? 'bg-purple-100 border-l-purple-600 ring-2 ring-purple-500/50 shadow-sm'
+                        : sp.isPassed
+                        ? 'bg-emerald-50/70 border-l-emerald-500'
+                        : isFocused
+                        ? 'bg-purple-50 border-l-purple-400 ring-1 ring-purple-300'
                         : isStart
-                        ? 'bg-emerald-50 border-l-emerald-500'
+                        ? 'bg-emerald-50/60 border-l-emerald-500'
                         : isStop
-                        ? 'bg-rose-50 border-l-rose-500'
-                        : sp.isReached
-                        ? 'bg-emerald-50 border-l-emerald-500'
+                        ? 'bg-rose-50/60 border-l-rose-500'
                         : 'bg-white border-l-purple-300'
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 min-w-0">
                         <span
-                          className={`text-xs font-black px-1.5 py-0.2 rounded-md flex-shrink-0 ${
+                          className={`text-xs font-black px-1.5 py-0.5 rounded-md flex-shrink-0 ${
                             isStart
                               ? 'bg-emerald-600 text-white'
                               : isStop
                               ? 'bg-rose-600 text-white'
-                              : sp.isReached
+                              : isActivePoint
+                              ? 'bg-purple-700 text-white'
+                              : sp.isPassed
                               ? 'bg-emerald-500 text-white'
                               : 'bg-purple-100 text-purple-700'
                           }`}
                         >
-                          {isStart ? 'START' : isStop ? 'CÉL' : sp.isReached ? '✓' : `#${sp.split.formattedIndex || idx}`}
+                          {isStart ? 'START' : isStop ? 'CÉL' : sp.isPassed ? '✓' : `#${sp.split.formattedIndex || idx}`}
                         </span>
-                        <span className="text-xs font-bold text-slate-800 truncate">
-                          {sp.split.name || (isStart ? 'Kezdőpont' : isStop ? 'Cél / Végpont' : `Pont #${idx}`)}
-                        </span>
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-slate-800 truncate flex items-center gap-1">
+                            <span>{sp.split.name || (isStart ? 'Kezdőpont' : isStop ? 'Cél / Végpont' : `Pont #${idx}`)}</span>
+                            {isActivePoint && (
+                              <span className="text-[8.5px] uppercase bg-purple-600 text-white font-extrabold px-1 py-0.2 rounded">
+                                🎯 Aktuális
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <span className="text-xs font-bold font-mono text-purple-700">
+                        <span className={`text-xs font-bold font-mono ${
+                          isActivePoint ? 'text-purple-700 text-sm' : sp.isPassed ? 'text-emerald-600' : 'text-slate-700'
+                        }`}>
                           {sp.formattedRelative}
                         </span>
                         <button
