@@ -122,9 +122,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       </header>
 
       {/* Scrollable Container */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
-        {/* 1. User & Team Card */}
-        <div className="bg-white rounded-3xl p-4 border border-slate-100 shadow-sm space-y-3">
+      <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+        <div className="max-w-3xl mx-auto space-y-4">
+          {/* 1. User & Team Card */}
+          <div className="bg-white rounded-3xl p-4 border border-slate-100 shadow-sm space-y-3">
           <div className="flex items-center gap-3.5">
             <div
               className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white text-xl font-black shadow-md ${
@@ -414,6 +415,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           >
             <RefreshCw className="w-3.5 h-3.5" /> Helyi trackek és adatok alaphelyzetbe állítása
           </button>
+        </div>
         </div>
       </div>
     </div>

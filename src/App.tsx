@@ -810,9 +810,9 @@ export default function App() {
   };
 
   return (
-    <div className="w-screen h-screen flex justify-center bg-[#1e293b] sm:p-4 select-none overflow-hidden">
-      {/* Mobile Frame Container (Max width 430px, fills height, strict fixed viewport, exactly as native mobile app) */}
-      <div className="w-full max-w-[430px] h-full bg-[#f4f7fb] sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden relative border border-slate-200/50">
+    <div className="w-screen h-screen flex flex-col bg-[#f4f7fb] select-none overflow-hidden text-[#191c1e]">
+      {/* Full-width responsive container */}
+      <div className="w-full h-full flex flex-col overflow-hidden relative">
         {/* Active Tab View */}
         {activeTab === 'activity' && (
           <ActivityView
@@ -836,6 +836,8 @@ export default function App() {
             onOpenCoordinates={() => setIsCoordinateModalOpen(true)}
             onLayerChange={(layer) => handleUpdateSettings({ mapLayer: layer })}
             onUpdateSplit={handleUpdateSplit}
+            onUpdateSettings={handleUpdateSettings}
+            onExportGPX={handleExportCurrentGPX}
           />
         )}
 

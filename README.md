@@ -6,7 +6,7 @@
 
 This contains everything you need to run your app locally.
 
-View your app in AI Studio: https://ai.studio/apps/0c7fe9b1-11cb-43fc-96ca-67539c8ca54c
+View your app in AI Studio: https://ai.studio/apps/36c98d4c-ab35-40cf-8170-793be0bc9b67
 
 ## Run Locally
 
@@ -18,4 +18,3 @@ View your app in AI Studio: https://ai.studio/apps/0c7fe9b1-11cb-43fc-96ca-67539
 2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
-"# gpstrackerrally" 

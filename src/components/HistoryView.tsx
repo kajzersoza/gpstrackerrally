@@ -142,7 +142,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               <ArrowLeft className="w-5 h-5" />
               <span>Vissza</span>
             </button>
-            <h2 className="text-base font-black text-slate-800 truncate max-w-[170px] font-heading">
+            <h2 className="text-base font-black text-slate-800 truncate max-w-[220px] font-heading">
               {selectedSession.title}
             </h2>
             <div className="flex items-center gap-1">
@@ -174,10 +174,154 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             </div>
           </header>
 
-          {/* Fixed Top Content (Map + Quick Metrics) */}
-          <div className="flex-shrink-0 px-3.5 pt-2 pb-1 space-y-2">
-            {/* Map Preview */}
-            <div className="w-full h-[150px] sm:h-[175px] rounded-2xl overflow-hidden shadow-sm border border-slate-200 relative">
+          {/* Responsive Layout: Mobile stacked, Tablet/Desktop side-by-side */}
+          <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden p-3 md:p-4 gap-3 md:gap-4">
+            {/* Left Column (Metrics + Splits) */}
+            <div className="w-full md:w-80 lg:w-96 flex flex-col min-h-0 gap-2.5 flex-shrink-0">
+              {/* Mobile-only Map preview */}
+              <div className="block md:hidden w-full h-[150px] rounded-2xl overflow-hidden shadow-sm border border-slate-200 relative flex-shrink-0">
+                <OsmMap
+                  coordinates={selectedSession.coordinates}
+                  currentLocation={null}
+                  splits={selectedSession.splits}
+                  mapLayer={settings.mapLayer}
+                  interactive={true}
+                  focusedSplitId={focusedSplitId}
+                  onSelectSplit={(split) => setFocusedSplitId(split.id)}
+                />
+              </div>
+
+              {/* Quick Metrics */}
+              <div className="grid grid-cols-2 gap-2 flex-shrink-0">
+                <div className="bg-[#eaf2ff] px-3.5 py-2 rounded-2xl border border-blue-100/70 shadow-2xs flex flex-col justify-between">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase">Távolság</span>
+                  {(() => {
+                    const distObj = formatDistanceByUnit(selectedSession.totalDistanceKm, settings.unit);
+                    return (
+                      <div className="flex items-baseline gap-1 mt-0.5">
+                        <span className="text-xl font-black text-[#0060e6] font-heading leading-tight">
+                          {distObj.value}
+                        </span>
+                        <span className="text-xs font-bold text-[#0060e6] font-heading">
+                          {distObj.unitLabel}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </div>
+                <div className="bg-white px-3.5 py-2 rounded-2xl border border-slate-100 shadow-2xs flex flex-col justify-between">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase">Időtartam</span>
+                  <span className="text-base font-black text-slate-800 font-heading mt-0.5">
+                    {formatElapsedTime(selectedSession.totalDurationSec)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Scrollable Splits List */}
+              <section className="flex-1 flex flex-col min-h-0 bg-white rounded-2xl border border-slate-200/80 p-3 shadow-xs overflow-hidden">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-100 flex-shrink-0">
+                  <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5 uppercase tracking-wider">
+                    <span>Résztávok ({selectedSession.splits.length})</span>
+                  </h3>
+                  <span className="text-[11px] font-medium text-slate-400">Kattints a fókuszhoz</span>
+                </div>
+
+                <div className="flex-1 overflow-y-auto min-h-0 space-y-2 mt-2 pr-0.5 custom-scrollbar">
+                  {selectedSession.splits.length === 0 ? (
+                    <div className="p-4 text-center text-xs font-bold text-slate-400 bg-slate-50 rounded-xl border border-slate-100">
+                      Nincsenek rögzített résztávok ebben a trackben.
+                    </div>
+                  ) : (
+                    selectedSession.splits.map((split) => {
+                      const splitDist = formatDistanceByUnit(split.distanceKm, settings.unit);
+                      const totalKm = getCumulativeDistanceForSplit(split, selectedSession.splits);
+                      const totalDist = formatDistanceByUnit(totalKm, settings.unit);
+                      const isFocused = focusedSplitId === split.id;
+                      const hasPhotos = split.photos && split.photos.length > 0;
+                      const hasNotes = !!split.notes;
+
+                      return (
+                        <div
+                          key={split.id}
+                          onClick={() => setFocusedSplitId(split.id === focusedSplitId ? null : split.id)}
+                          className={`p-2.5 rounded-xl border-l-4 transition-all cursor-pointer flex flex-col gap-1.5 ${
+                            isFocused
+                              ? 'bg-blue-100/90 border-l-[#0050cb] ring-2 ring-[#0050cb]/30 shadow-md scale-[1.01]'
+                              : 'bg-[#eaf2ff] border-l-[#0060e6] hover:bg-[#e1edff] active:scale-[0.99]'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span
+                                className={`text-lg font-black w-6 text-center font-heading flex-shrink-0 ${
+                                  isFocused ? 'text-[#0050cb]' : 'text-[#0060e6]'
+                                }`}
+                              >
+                                {split.formattedIndex}
+                              </span>
+                              <div className="min-w-0">
+                                {split.name && (
+                                  <div className="text-xs font-black text-[#0050cb] truncate font-heading">
+                                    {split.name}
+                                  </div>
+                                )}
+                                <div className="flex items-baseline gap-2 flex-wrap">
+                                  <span className="text-base font-black text-slate-900 font-heading">
+                                    {splitDist.value} {splitDist.unitLabel}
+                                  </span>
+                                  <span className="text-xs font-bold text-slate-500 font-heading">
+                                    {totalDist.value} {totalDist.unitLabel}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <span className="text-sm font-bold font-mono text-[#0060e6]">
+                                {split.formattedTime}
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingSplit(split);
+                                }}
+                                className="p-1.5 bg-white/80 hover:bg-white text-[#0050cb] hover:text-blue-700 rounded-lg shadow-2xs transition-all active:scale-90 cursor-pointer border border-blue-200/50"
+                                title="Résztáv szerkesztése, megjegyzés, fotó, megosztás"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Notes / Photos preview badge */}
+                          {(hasNotes || hasPhotos) && (
+                            <div className="flex items-center gap-2 pt-0.5 pl-8 flex-wrap text-[11px]">
+                              {hasNotes && (
+                                <div className="flex items-center gap-1 bg-white/70 px-2 py-0.5 rounded-md text-slate-700 font-medium truncate max-w-[200px]">
+                                  <MessageSquare className="w-3 h-3 text-[#0050cb] flex-shrink-0" />
+                                  <span className="truncate">{split.notes}</span>
+                                </div>
+                              )}
+                              {hasPhotos && (
+                                <div className="flex items-center gap-1 bg-white/70 px-2 py-0.5 rounded-md text-[#0050cb] font-bold">
+                                  <Camera className="w-3 h-3 flex-shrink-0" />
+                                  <span>{split.photos!.length} fotó</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </section>
+            </div>
+
+            {/* Right Column for Desktop / Tablet: Full-height Map */}
+            <div className="hidden md:flex flex-1 min-w-[320px] h-full rounded-2xl overflow-hidden shadow-sm border border-slate-200 relative bg-slate-100">
               <OsmMap
                 coordinates={selectedSession.coordinates}
                 currentLocation={null}
@@ -188,141 +332,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 onSelectSplit={(split) => setFocusedSplitId(split.id)}
               />
             </div>
-
-            {/* Quick Metrics */}
-            <div className="grid grid-cols-2 gap-2">
-              <div className="bg-[#eaf2ff] px-3.5 py-2 rounded-2xl border border-blue-100/70 shadow-2xs flex items-baseline justify-between">
-                <span className="text-[11px] font-bold text-slate-500 uppercase">Távolság</span>
-                {(() => {
-                  const distObj = formatDistanceByUnit(selectedSession.totalDistanceKm, settings.unit);
-                  return (
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-xl font-black text-[#0060e6] font-heading leading-tight">
-                        {distObj.value}
-                      </span>
-                      <span className="text-xs font-bold text-[#0060e6] font-heading">
-                        {distObj.unitLabel}
-                      </span>
-                    </div>
-                  );
-                })()}
-              </div>
-              <div className="bg-white px-3.5 py-2 rounded-2xl border border-slate-100 shadow-2xs flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-400 uppercase">Időtartam</span>
-                <span className="text-base font-black text-slate-800 font-heading">
-                  {formatElapsedTime(selectedSession.totalDurationSec)}
-                </span>
-              </div>
-            </div>
           </div>
-
-          {/* ONLY THE SPLITS LIST IS SCROLLABLE (just like on main ActivityView) */}
-          <section className="flex-1 flex flex-col min-h-0 px-3.5 pb-2 overflow-hidden">
-            <div className="flex items-center justify-between py-1 px-1 flex-shrink-0">
-              <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5 uppercase tracking-wider">
-                <span>Résztávok ({selectedSession.splits.length})</span>
-              </h3>
-              <span className="text-[11px] font-medium text-slate-400">Kattints a térkép zoomhoz</span>
-            </div>
-
-            <div className="flex-1 overflow-y-auto min-h-0 space-y-2 pr-0.5 custom-scrollbar">
-              {selectedSession.splits.length === 0 ? (
-                <div className="p-4 text-center text-xs font-bold text-slate-400 bg-white rounded-2xl border border-slate-100">
-                  Nincsenek rögzített résztávok ebben a trackben.
-                </div>
-              ) : (
-                selectedSession.splits.map((split) => {
-                  const splitDist = formatDistanceByUnit(split.distanceKm, settings.unit);
-                  const totalKm = getCumulativeDistanceForSplit(split, selectedSession.splits);
-                  const totalDist = formatDistanceByUnit(totalKm, settings.unit);
-                  const isFocused = focusedSplitId === split.id;
-                  const hasPhotos = split.photos && split.photos.length > 0;
-                  const hasNotes = !!split.notes;
-
-                  return (
-                    <div
-                      key={split.id}
-                      onClick={() => setFocusedSplitId(split.id === focusedSplitId ? null : split.id)}
-                      className={`p-2.5 rounded-xl border-l-4 transition-all cursor-pointer flex flex-col gap-1.5 ${
-                        isFocused
-                          ? 'bg-blue-100/90 border-l-[#0050cb] ring-2 ring-[#0050cb]/30 shadow-md scale-[1.01]'
-                          : 'bg-[#eaf2ff] border-l-[#0060e6] hover:bg-[#e1edff] active:scale-[0.99]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span
-                            className={`text-lg font-black w-6 text-center font-heading flex-shrink-0 ${
-                              isFocused ? 'text-[#0050cb]' : 'text-[#0060e6]'
-                            }`}
-                          >
-                            {split.formattedIndex}
-                          </span>
-                          <div className="min-w-0">
-                            {split.name && (
-                              <div className="text-xs font-black text-[#0050cb] truncate font-heading">
-                                {split.name}
-                              </div>
-                            )}
-                            <div className="flex items-baseline gap-2 flex-wrap">
-                              <span className="text-base font-black text-slate-900 font-heading">
-                                {splitDist.value} {splitDist.unitLabel}
-                              </span>
-                              <span className="text-xs font-bold text-slate-500 font-heading">
-                                {totalDist.value} {totalDist.unitLabel}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 flex-shrink-0">
-                          <span className="text-sm font-bold font-mono text-[#0060e6]">
-                            {split.formattedTime}
-                          </span>
-
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingSplit(split);
-                            }}
-                            className="p-1.5 bg-white/80 hover:bg-white text-[#0050cb] hover:text-blue-700 rounded-lg shadow-2xs transition-all active:scale-90 cursor-pointer border border-blue-200/50"
-                            title="Résztáv szerkesztése, megjegyzés, fotó, megosztás"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Notes / Photos preview badge */}
-                      {(hasNotes || hasPhotos) && (
-                        <div className="flex items-center gap-2 pt-0.5 pl-8 flex-wrap text-[11px]">
-                          {hasNotes && (
-                            <div className="flex items-center gap-1 bg-white/70 px-2 py-0.5 rounded-md text-slate-700 font-medium truncate max-w-[200px]">
-                              <MessageSquare className="w-3 h-3 text-[#0050cb] flex-shrink-0" />
-                              <span className="truncate">{split.notes}</span>
-                            </div>
-                          )}
-                          {hasPhotos && (
-                            <div className="flex items-center gap-1 bg-white/70 px-2 py-0.5 rounded-md text-[#0050cb] font-bold">
-                              <Camera className="w-3 h-3 flex-shrink-0" />
-                              <span>{split.photos!.length} fotó</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </section>
         </div>
       ) : (
         /* Sessions List View */
         <div className="flex-1 flex flex-col h-full overflow-hidden">
           {/* Header */}
-          <header className="flex-shrink-0 px-3.5 py-3 bg-white border-b border-slate-100 flex items-center justify-between">
+          <header className="flex-shrink-0 px-4 py-3 bg-white border-b border-slate-100 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -340,34 +356,35 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             </span>
           </header>
 
-          {/* List */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-            {/* Quick Cloud Sync / Code Load Bar */}
-            {onOpenCloudLoad && (
-              <div className="bg-gradient-to-r from-blue-50 to-indigo-50/60 p-3 rounded-2xl border border-blue-100/80 shadow-2xs flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-xl bg-[#0050cb] text-white flex items-center justify-center">
-                    <Cloud className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-black text-slate-800 font-heading">
-                      Felhős Track Betöltése
+          {/* List with max-w-4xl container */}
+          <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+            <div className="max-w-4xl mx-auto space-y-3">
+              {/* Quick Cloud Sync / Code Load Bar */}
+              {onOpenCloudLoad && (
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50/60 p-3.5 rounded-2xl border border-blue-100/80 shadow-2xs flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-[#0050cb] text-white flex items-center justify-center">
+                      <Cloud className="w-4 h-4" />
                     </div>
-                    <div className="text-[10px] text-slate-500 font-medium">
-                      Közös rally pályák és csapattársak adatai
+                    <div>
+                      <div className="text-xs font-black text-slate-800 font-heading">
+                        Felhős Track Betöltése
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-medium">
+                        Közös rally pályák és csapattársak adatai
+                      </div>
                     </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={onOpenCloudLoad}
+                    className="bg-[#0050cb] hover:bg-blue-700 active:bg-blue-800 text-white px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1 transition-all cursor-pointer shadow-xs active:scale-95"
+                  >
+                    <CloudDownload className="w-3.5 h-3.5" />
+                    <span>Kód megadása</span>
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={onOpenCloudLoad}
-                  className="bg-[#0050cb] hover:bg-blue-700 active:bg-blue-800 text-white px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1 transition-all cursor-pointer shadow-xs active:scale-95"
-                >
-                  <CloudDownload className="w-3.5 h-3.5" />
-                  <span>Kód megadása</span>
-                </button>
-              </div>
-            )}
+              )}
 
             {sessions.length === 0 ? (
               <div className="h-64 flex flex-col items-center justify-center text-center p-6 bg-white rounded-2xl border border-slate-100 shadow-sm mt-4">
@@ -474,6 +491,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 );
               })
             )}
+            </div>
           </div>
         </div>
       )}

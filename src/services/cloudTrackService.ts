@@ -15,12 +15,21 @@ import { ActivitySession, SharedCloudTrack } from '../types';
 
 const COLLECTION_NAME = 'shared_tracks';
 
-// Helper to generate a clean, readable 6-character Rally code e.g. RLY-482
+// Helper to generate a clean, readable and unique 5-6 character Rally code e.g. RLY-842A
 export const generateShareCode = (): string => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let numPart = '';
-  for (let i = 0; i < 4; i++) {
-    numPart += chars.charAt(Math.floor(Math.random() * chars.length));
+  // Use crypto random values when available for true randomness
+  if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
+    const array = new Uint8Array(4);
+    window.crypto.getRandomValues(array);
+    for (let i = 0; i < 4; i++) {
+      numPart += chars.charAt(array[i] % chars.length);
+    }
+  } else {
+    for (let i = 0; i < 4; i++) {
+      numPart += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
   }
   return `RLY-${numPart}`;
 };

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Cloud,
@@ -54,6 +54,25 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadedPreview, setLoadedPreview] = useState<SharedCloudTrack | null>(null);
+
+  // Reset modal state whenever the modal opens or a different track is selected
+  useEffect(() => {
+    if (isOpen) {
+      if (sessionToShare) {
+        setActiveTab('share');
+      } else {
+        setActiveTab('load');
+      }
+      setUploadedTrack(null);
+      setIsUploading(false);
+      setCopiedLink(false);
+      setCopiedCode(false);
+      setInputCode('');
+      setLoadError(null);
+      setLoadedPreview(null);
+      setAllowEdit(userProfile.defaultAllowPublicEdit ?? true);
+    }
+  }, [isOpen, sessionToShare?.id, userProfile.defaultAllowPublicEdit]);
 
   if (!isOpen) return null;
 
