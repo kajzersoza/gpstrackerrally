@@ -518,9 +518,110 @@ export function getFullSessionSplits(session: ActivitySession): Split[] {
 }
 
 /**
- * Calculates dynamic metrics relative to a loaded reference track
- * When the user is within ~100 meters of the track, calculates cumulative along-track distances.
- * Signs: "-" when approaching an upcoming point, "+" after passing/leaving a point.
+ * Projects a coordinate onto the continuous polyline formed by all points of a track log.
+ * Computes the exact closest point on any segment of the entire log, the perpendicular distance,
+ * and the cumulative along-track distance from the log's start.
+ */
+export function projectPointOntoPolyline(
+  point: Coordinate,
+  coords: Coordinate[],
+  cumDist: number[]
+): {
+  closestPoint: Coordinate;
+  alongTrackDistKm: number;
+  crossTrackDistanceKm: number;
+  segmentIndex: number;
+} {
+  if (coords.length === 0) {
+    return {
+      closestPoint: point,
+      alongTrackDistKm: 0,
+      crossTrackDistanceKm: 0,
+      segmentIndex: 0,
+    };
+  }
+
+  if (coords.length === 1) {
+    const d = calculateDistance(point.lat, point.lng, coords[0].lat, coords[0].lng);
+    return {
+      closestPoint: coords[0],
+      alongTrackDistKm: 0,
+      crossTrackDistanceKm: d,
+      segmentIndex: 0,
+    };
+  }
+
+  let minCrossTrackKm = Infinity;
+  let bestPoint: Coordinate = coords[0];
+  let bestAlongTrackKm = 0;
+  let bestSegmentIndex = 0;
+
+  for (let i = 0; i < coords.length - 1; i++) {
+    const p1 = coords[i];
+    const p2 = coords[i + 1];
+    const segDistKm = Math.max(0, cumDist[i + 1] - cumDist[i]);
+
+    if (segDistKm < 0.000001) {
+      const d = calculateDistance(point.lat, point.lng, p1.lat, p1.lng);
+      if (d < minCrossTrackKm) {
+        minCrossTrackKm = d;
+        bestPoint = p1;
+        bestAlongTrackKm = cumDist[i];
+        bestSegmentIndex = i;
+      }
+      continue;
+    }
+
+    const midLatRad = deg2rad((p1.lat + p2.lat) / 2);
+    const cosLat = Math.cos(midLatRad);
+
+    const dx = (p2.lng - p1.lng) * cosLat;
+    const dy = p2.lat - p1.lat;
+    const segLenSq = dx * dx + dy * dy;
+
+    let u = 0;
+    if (segLenSq > 0) {
+      u = ((point.lng - p1.lng) * cosLat * dx + (point.lat - p1.lat) * dy) / segLenSq;
+    }
+    const uClamped = Math.max(0, Math.min(1, u));
+
+    const projLat = p1.lat + uClamped * (p2.lat - p1.lat);
+    const projLng = p1.lng + uClamped * (p2.lng - p1.lng);
+
+    const d = calculateDistance(point.lat, point.lng, projLat, projLng);
+    if (d < minCrossTrackKm) {
+      minCrossTrackKm = d;
+      bestPoint = {
+        lat: projLat,
+        lng: projLng,
+        timestamp: p1.timestamp ?? Date.now(),
+        altitude:
+          p1.altitude !== undefined && p2.altitude !== undefined
+            ? p1.altitude + uClamped * (p2.altitude - p1.altitude)
+            : p1.altitude,
+      };
+      bestAlongTrackKm = cumDist[i] + uClamped * segDistKm;
+      bestSegmentIndex = i;
+    }
+  }
+
+  return {
+    closestPoint: bestPoint,
+    alongTrackDistKm: bestAlongTrackKm,
+    crossTrackDistanceKm: minCrossTrackKm,
+    segmentIndex: bestSegmentIndex,
+  };
+}
+
+/**
+ * Calculates dynamic metrics relative to a loaded reference track.
+ * Compares the user's GPS signal to any point of the entire logged route path,
+ * computing continuous along-track distances, +/- relative distances to all points,
+ * and next upcoming checkpoints.
+ *
+ * Signs:
+ *  "-" when approaching an upcoming point along the route (remaining distance)
+ *  "+" after passing a point along the route (elapsed distance since the point)
  */
 export function calculateReferenceMetrics(
   currentLoc: Coordinate | null,
@@ -532,7 +633,7 @@ export function calculateReferenceMetrics(
 
   const activePos = currentLoc || coords[0];
 
-  // 1. Precalculate cumulative path distances along reference track coordinates
+  // 1. Precalculate cumulative path distances along the entire continuous logged track
   const cumDist: number[] = new Array(coords.length);
   cumDist[0] = 0;
   for (let i = 1; i < coords.length; i++) {
@@ -540,56 +641,11 @@ export function calculateReferenceMetrics(
   }
   const totalTrackKm = cumDist[coords.length - 1] || referenceSession.totalDistanceKm || 0;
 
-  // 2. Find closest coordinate & perpendicular segment projection along the track
-  let minDistanceToPathKm = Infinity;
-  let closestCoord: Coordinate = coords[0];
-  let closestIndex = 0;
-  let userTrackDistKm = 0;
-
-  for (let i = 0; i < coords.length; i++) {
-    const d = calculateDistance(activePos.lat, activePos.lng, coords[i].lat, coords[i].lng);
-    if (d < minDistanceToPathKm) {
-      minDistanceToPathKm = d;
-      closestCoord = coords[i];
-      closestIndex = i;
-    }
-  }
-
-  userTrackDistKm = cumDist[closestIndex];
-
-  // Refine user position along track with segment projection if multi-point
-  if (coords.length > 1) {
-    const checkSegments: Array<[number, number]> = [];
-    if (closestIndex > 0) checkSegments.push([closestIndex - 1, closestIndex]);
-    if (closestIndex < coords.length - 1) checkSegments.push([closestIndex, closestIndex + 1]);
-
-    for (const [i1, i2] of checkSegments) {
-      const p1 = coords[i1];
-      const p2 = coords[i2];
-      const segLenKm = cumDist[i2] - cumDist[i1];
-      if (segLenKm > 0.0001) {
-        const cosLat = Math.cos((deg2rad(p1.lat + p2.lat) / 2));
-        const dx = (p2.lng - p1.lng) * cosLat;
-        const dy = p2.lat - p1.lat;
-        const segLenSq = dx * dx + dy * dy;
-        if (segLenSq > 0) {
-          const u = ((activePos.lng - p1.lng) * cosLat * dx + (activePos.lat - p1.lat) * dy) / segLenSq;
-          const clampedU = Math.max(0, Math.min(1, u));
-          const projDistKm = cumDist[i1] + clampedU * segLenKm;
-          const projLat = p1.lat + clampedU * (p2.lat - p1.lat);
-          const projLng = p1.lng + clampedU * (p2.lng - p1.lng);
-          const dProj = calculateDistance(activePos.lat, activePos.lng, projLat, projLng);
-          if (dProj <= minDistanceToPathKm) {
-            minDistanceToPathKm = dProj;
-            closestCoord = { ...coords[closestIndex], lat: projLat, lng: projLng };
-            userTrackDistKm = projDistKm;
-          }
-        }
-      }
-    }
-  }
-
-  const crossTrackDistanceMeters = Math.round(minDistanceToPathKm * 1000);
+  // 2. Find the user's exact closest projection onto ANY point/segment of the entire continuous route log
+  const userProjection = projectPointOntoPolyline(activePos, coords, cumDist);
+  const userTrackDistKm = userProjection.alongTrackDistKm;
+  const closestCoord = userProjection.closestPoint;
+  const crossTrackDistanceMeters = Math.round(userProjection.crossTrackDistanceKm * 1000);
   const isOnTrack = crossTrackDistanceMeters <= 100; // within ~100m corridor
 
   // 3. Elapsed distance along track from Start (+) and Remaining to End (-)
@@ -607,10 +663,10 @@ export function calculateReferenceMetrics(
     ? Math.min(100, Math.max(0, Math.round((userTrackDistKm / totalTrackKm) * 100)))
     : 0;
 
-  // 4. Calculate full checkpoints sequence (Start, intermediate splits, Stop)
+  // 4. Calculate full checkpoints sequence (Start, intermediate splits/waypoints, Stop)
   const sortedSplits = getFullSessionSplits(referenceSession);
 
-  // Map each split to its along-track distance
+  // Map each split to its precise along-track distance along the continuous log
   const splitsProgress = sortedSplits.map((split, idx) => {
     let alongTrackDistKm = 0;
     const isStart = split.id.startsWith('start') || split.splitIndex === 0 || split.formattedIndex === 'START';
@@ -620,25 +676,16 @@ export function calculateReferenceMetrics(
       alongTrackDistKm = 0;
     } else if (isStop) {
       alongTrackDistKm = totalTrackKm;
+    } else if (split.coordinate) {
+      // Project the split coordinate onto the continuous polyline of the track log
+      const splitProj = projectPointOntoPolyline(split.coordinate, coords, cumDist);
+      alongTrackDistKm = splitProj.alongTrackDistKm;
     } else if (typeof split.totalDistanceKm === 'number' && split.totalDistanceKm > 0 && split.totalDistanceKm <= totalTrackKm * 1.05) {
       alongTrackDistKm = split.totalDistanceKm;
     } else {
-      let splitCoord = split.coordinate;
-      if (!splitCoord) {
-        const frac = (idx + 1) / Math.max(1, sortedSplits.length);
-        const cIdx = Math.min(coords.length - 1, Math.floor(frac * (coords.length - 1)));
-        splitCoord = coords[cIdx];
-      }
-      let minD = Infinity;
-      let bestIdx = 0;
-      for (let i = 0; i < coords.length; i++) {
-        const d = calculateDistance(splitCoord.lat, splitCoord.lng, coords[i].lat, coords[i].lng);
-        if (d < minD) {
-          minD = d;
-          bestIdx = i;
-        }
-      }
-      alongTrackDistKm = cumDist[bestIdx];
+      const frac = (idx + 1) / Math.max(1, sortedSplits.length);
+      const cIdx = Math.min(coords.length - 1, Math.floor(frac * (coords.length - 1)));
+      alongTrackDistKm = cumDist[cIdx];
     }
 
     // Relative difference along the track:
@@ -649,24 +696,24 @@ export function calculateReferenceMetrics(
     const absDiffKm = Math.abs(diffKm);
     const absDiffMeters = Math.abs(diffMeters);
 
-    const isPassed = diffKm < -0.015; // passed by more than 15 meters along the track
+    const isPassed = diffKm < -0.015; // passed by more than 15 meters along the continuous track
     const isApproaching = diffKm > 0.015; // approaching by more than 15 meters
     const isAtPoint = absDiffMeters <= 15;
 
     const formattedObj = formatDistanceByUnit(absDiffKm, unit);
     let formattedRelative = '';
     if (isApproaching) {
-      // Közeledünk a ponthoz, még nem hagytuk el -> "-"
+      // Közeledünk a ponthoz az útvonal mentén -> "-"
       formattedRelative = `-${formattedObj.value} ${formattedObj.unitLabel}`;
     } else if (isPassed) {
-      // Elhagytuk a pontot -> "+"
+      // Elhagytuk a pontot az útvonal mentén -> "+"
       formattedRelative = `+${formattedObj.value} ${formattedObj.unitLabel}`;
     } else {
       // Pontosan a pontnál vagyunk
       formattedRelative = `0 ${formattedObj.unitLabel}`;
     }
 
-    const splitCoord = split.coordinate || (closestIndex < coords.length ? coords[closestIndex] : coords[0]);
+    const splitCoord = split.coordinate || (coords.length > 0 ? coords[0] : activePos);
     const bearingDeg = splitCoord ? calculateBearing(activePos.lat, activePos.lng, splitCoord.lat, splitCoord.lng) : 0;
     const bearingCompass = getCompassDirection(bearingDeg);
 
