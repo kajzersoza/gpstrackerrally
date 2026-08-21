@@ -420,6 +420,96 @@ export interface ReferenceTrackMetrics {
 }
 
 /**
+ * Constructs the complete array of waypoints for a session,
+ * explicitly including the START (Indulási pont / Kezdőpont) and STOP / CÉL (Végpont / Cél)
+ * alongside any recorded intermediate splits.
+ */
+export function getFullSessionSplits(session: ActivitySession): Split[] {
+  const coords = session.coordinates || [];
+  const rawSplits = session.splits || [];
+
+  if (coords.length === 0 && rawSplits.length === 0) {
+    return [];
+  }
+
+  const result: Split[] = [];
+
+  // Check if a start split already exists
+  const hasExistingStart = rawSplits.some(
+    (s) => s.id.startsWith('start') || s.splitIndex === 0 || s.name?.toLowerCase().includes('start')
+  );
+
+  if (!hasExistingStart && coords.length > 0) {
+    const startCoord = coords[0];
+    const startTimeFormatted =
+      session.formattedStartTime || (session.startTime ? formatClockTime(session.startTime) : '00:00');
+    result.push({
+      id: `start-${session.id}`,
+      splitIndex: 0,
+      formattedIndex: 'START',
+      name: '🚩 START (Kezdőpont)',
+      distanceKm: 0,
+      formattedDistance: '0.00 km',
+      timeSec: 0,
+      formattedTime: startTimeFormatted,
+      paceSecPerKm: 0,
+      totalDistanceKm: 0,
+      totalTimeSec: 0,
+      timestamp: session.startTime || Date.now(),
+      coordinate: startCoord,
+      notes: 'Automatikusan rögzített kezdőpont / Indulási koordináta',
+    });
+  }
+
+  // Add all intermediate splits sorted by splitIndex / timestamp
+  const sortedSplits = [...rawSplits].sort((a, b) => {
+    if (a.splitIndex !== b.splitIndex) return a.splitIndex - b.splitIndex;
+    return a.timestamp - b.timestamp;
+  });
+
+  sortedSplits.forEach((s) => {
+    // If it's already a start or stop, avoid duplication
+    if (result.some((existing) => existing.id === s.id)) return;
+    result.push(s);
+  });
+
+  // Check if a stop/finish split already exists
+  const hasExistingStop = result.some(
+    (s) =>
+      s.id.startsWith('stop') ||
+      s.formattedIndex === 'CÉL' ||
+      s.name?.toLowerCase().includes('cél') ||
+      s.name?.toLowerCase().includes('stop')
+  );
+
+  if (!hasExistingStop && coords.length > 1) {
+    const endCoord = coords[coords.length - 1];
+    const endTime =
+      session.endTime ||
+      (session.startTime ? session.startTime + session.totalDurationSec * 1000 : Date.now());
+    const endTimeFormatted = formatClockTime(endTime);
+    result.push({
+      id: `stop-${session.id}`,
+      splitIndex: result.length + 1,
+      formattedIndex: 'CÉL',
+      name: '🏁 STOP (Cél / Végpont)',
+      distanceKm: session.totalDistanceKm,
+      formattedDistance: `${session.totalDistanceKm.toFixed(2)} km`,
+      timeSec: session.totalDurationSec,
+      formattedTime: endTimeFormatted,
+      paceSecPerKm: session.avgPaceSecPerKm,
+      totalDistanceKm: session.totalDistanceKm,
+      totalTimeSec: session.totalDurationSec,
+      timestamp: endTime,
+      coordinate: endCoord,
+      notes: 'Automatikusan rögzített célvonal / Befejezési koordináta',
+    });
+  }
+
+  return result;
+}
+
+/**
  * Calculates dynamic metrics relative to a loaded reference track
  */
 export function calculateReferenceMetrics(
@@ -464,10 +554,8 @@ export function calculateReferenceMetrics(
   const crossTrackDistanceMeters = Math.round(minDistanceToPath * 1000);
   const progressPercent = Math.min(100, Math.max(0, Math.round((closestIndex / Math.max(1, coords.length - 1)) * 100)));
 
-  // Calculate splits progress
-  const refSplits = referenceSession.splits || [];
-  // Sort reference splits by index
-  const sortedSplits = [...refSplits].sort((a, b) => a.splitIndex - b.splitIndex);
+  // Calculate splits progress using the full sequence including Start and Stop
+  const sortedSplits = getFullSessionSplits(referenceSession);
 
   const PROXIMITY_THRESHOLD_METERS = 35; // within 35 meters is considered reached
   let nextSplitObj: ReferenceTrackMetrics['nextSplit'] = null;

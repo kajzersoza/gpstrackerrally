@@ -26,6 +26,7 @@ import {
   exportToGPX,
   formatDistanceByUnit,
   getCumulativeDistanceForSplit,
+  getFullSessionSplits,
 } from '../utils/geoUtils';
 import { OsmMap } from './OsmMap';
 import { SplitDetailModal } from './SplitDetailModal';
@@ -237,107 +238,144 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 </div>
               </div>
 
-              {/* Scrollable Splits List */}
-              <section className="flex-1 flex flex-col min-h-0 bg-white rounded-2xl border border-slate-200/80 p-3 shadow-xs overflow-hidden">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-100 flex-shrink-0">
-                  <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5 uppercase tracking-wider">
-                    <span>Résztávok ({selectedSession.splits.length})</span>
-                  </h3>
-                  <span className="text-[11px] font-medium text-slate-400">Kattints a fókuszhoz</span>
-                </div>
-
-                <div className="flex-1 overflow-y-auto min-h-0 space-y-2 mt-2 pr-0.5 custom-scrollbar">
-                  {selectedSession.splits.length === 0 ? (
-                    <div className="p-4 text-center text-xs font-bold text-slate-400 bg-slate-50 rounded-xl border border-slate-100">
-                      Nincsenek rögzített résztávok ebben a trackben.
+              {/* Scrollable Splits & Checkpoints List */}
+              {(() => {
+                const fullSplits = getFullSessionSplits(selectedSession);
+                return (
+                  <section className="flex-1 flex flex-col min-h-0 bg-white rounded-2xl border border-slate-200/80 p-3 shadow-xs overflow-hidden">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 flex-shrink-0">
+                      <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5 uppercase tracking-wider">
+                        <span>Útvonal Pontjai ({fullSplits.length})</span>
+                      </h3>
+                      <span className="text-[11px] font-medium text-slate-400">Kattints a fókuszhoz</span>
                     </div>
-                  ) : (
-                    selectedSession.splits.map((split) => {
-                      const splitDist = formatDistanceByUnit(split.distanceKm, settings.unit);
-                      const totalKm = getCumulativeDistanceForSplit(split, selectedSession.splits);
-                      const totalDist = formatDistanceByUnit(totalKm, settings.unit);
-                      const isFocused = focusedSplitId === split.id;
-                      const hasPhotos = split.photos && split.photos.length > 0;
-                      const hasNotes = !!split.notes;
 
-                      return (
-                        <div
-                          key={split.id}
-                          onClick={() => setFocusedSplitId(split.id === focusedSplitId ? null : split.id)}
-                          className={`p-2.5 rounded-xl border-l-4 transition-all cursor-pointer flex flex-col gap-1.5 ${
-                            isFocused
-                              ? 'bg-blue-100/90 border-l-[#0050cb] ring-2 ring-[#0050cb]/30 shadow-md scale-[1.01]'
-                              : 'bg-[#eaf2ff] border-l-[#0060e6] hover:bg-[#e1edff] active:scale-[0.99]'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <span
-                                className={`text-lg font-black w-6 text-center font-heading flex-shrink-0 ${
-                                  isFocused ? 'text-[#0050cb]' : 'text-[#0060e6]'
-                                }`}
-                              >
-                                {split.formattedIndex}
-                              </span>
-                              <div className="min-w-0">
-                                {split.name && (
-                                  <div className="text-xs font-black text-[#0050cb] truncate font-heading">
-                                    {split.name}
+                    <div className="flex-1 overflow-y-auto min-h-0 space-y-2 mt-2 pr-0.5 custom-scrollbar">
+                      {fullSplits.length === 0 ? (
+                        <div className="p-4 text-center text-xs font-bold text-slate-400 bg-slate-50 rounded-xl border border-slate-100">
+                          Nincsenek rögzített pontok ebben a trackben.
+                        </div>
+                      ) : (
+                        fullSplits.map((split) => {
+                          const isStart = split.id.startsWith('start') || split.splitIndex === 0 || split.formattedIndex === 'START';
+                          const isStop = split.id.startsWith('stop') || split.formattedIndex === 'CÉL';
+                          const splitDist = formatDistanceByUnit(split.distanceKm, settings.unit);
+                          const totalKm = isStart ? 0 : isStop ? selectedSession.totalDistanceKm : getCumulativeDistanceForSplit(split, selectedSession.splits);
+                          const totalDist = formatDistanceByUnit(totalKm, settings.unit);
+                          const isFocused = focusedSplitId === split.id;
+                          const hasPhotos = split.photos && split.photos.length > 0;
+                          const hasNotes = !!split.notes;
+
+                          return (
+                            <div
+                              key={split.id}
+                              onClick={() => setFocusedSplitId(split.id === focusedSplitId ? null : split.id)}
+                              className={`p-2.5 rounded-xl border-l-4 transition-all cursor-pointer flex flex-col gap-1.5 ${
+                                isFocused
+                                  ? isStart
+                                    ? 'bg-emerald-100/90 border-l-emerald-600 ring-2 ring-emerald-500/40 shadow-md scale-[1.01]'
+                                    : isStop
+                                    ? 'bg-rose-100/90 border-l-rose-600 ring-2 ring-rose-500/40 shadow-md scale-[1.01]'
+                                    : 'bg-blue-100/90 border-l-[#0050cb] ring-2 ring-[#0050cb]/30 shadow-md scale-[1.01]'
+                                  : isStart
+                                  ? 'bg-emerald-50/80 border-l-emerald-500 hover:bg-emerald-100/70 active:scale-[0.99]'
+                                  : isStop
+                                  ? 'bg-rose-50/80 border-l-rose-500 hover:bg-rose-100/70 active:scale-[0.99]'
+                                  : 'bg-[#eaf2ff] border-l-[#0060e6] hover:bg-[#e1edff] active:scale-[0.99]'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <span
+                                    className={`text-sm font-black px-2 py-0.5 rounded-md text-center font-heading flex-shrink-0 ${
+                                      isStart
+                                        ? 'bg-emerald-600 text-white'
+                                        : isStop
+                                        ? 'bg-rose-600 text-white'
+                                        : isFocused
+                                        ? 'text-[#0050cb] text-base w-6'
+                                        : 'text-[#0060e6] text-base w-6'
+                                    }`}
+                                  >
+                                    {isStart ? '🚩 START' : isStop ? '🏁 CÉL' : split.formattedIndex}
+                                  </span>
+                                  <div className="min-w-0">
+                                    <div
+                                      className={`text-xs font-black truncate font-heading ${
+                                        isStart
+                                          ? 'text-emerald-800'
+                                          : isStop
+                                          ? 'text-rose-800'
+                                          : 'text-[#0050cb]'
+                                      }`}
+                                    >
+                                      {split.name || (isStart ? 'Kezdőpont' : isStop ? 'Cél / Befejezés' : `Résztáv #${split.formattedIndex}`)}
+                                    </div>
+                                    <div className="flex items-baseline gap-2 flex-wrap">
+                                      <span className="text-base font-black text-slate-900 font-heading">
+                                        {isStart ? '0.00 km' : `${splitDist.value} ${splitDist.unitLabel}`}
+                                      </span>
+                                      {!isStart && (
+                                        <span className="text-xs font-bold text-slate-500 font-heading">
+                                          (Össz: {totalDist.value} {totalDist.unitLabel})
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
-                                )}
-                                <div className="flex items-baseline gap-2 flex-wrap">
-                                  <span className="text-base font-black text-slate-900 font-heading">
-                                    {splitDist.value} {splitDist.unitLabel}
+                                </div>
+
+                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                  <span
+                                    className={`text-sm font-bold font-mono ${
+                                      isStart
+                                        ? 'text-emerald-700'
+                                        : isStop
+                                        ? 'text-rose-700'
+                                        : 'text-[#0060e6]'
+                                    }`}
+                                  >
+                                    {split.formattedTime}
                                   </span>
-                                  <span className="text-xs font-bold text-slate-500 font-heading">
-                                    {totalDist.value} {totalDist.unitLabel}
-                                  </span>
+
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingSplit(split);
+                                    }}
+                                    className="p-1.5 bg-white/80 hover:bg-white text-slate-700 hover:text-blue-700 rounded-lg shadow-2xs transition-all active:scale-90 cursor-pointer border border-slate-200"
+                                    title="Pont szerkesztése, megjegyzés, fotó, megosztás"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                  </button>
                                 </div>
                               </div>
-                            </div>
 
-                            <div className="flex items-center gap-1.5 flex-shrink-0">
-                              <span className="text-sm font-bold font-mono text-[#0060e6]">
-                                {split.formattedTime}
-                              </span>
-
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingSplit(split);
-                                }}
-                                className="p-1.5 bg-white/80 hover:bg-white text-[#0050cb] hover:text-blue-700 rounded-lg shadow-2xs transition-all active:scale-90 cursor-pointer border border-blue-200/50"
-                                title="Résztáv szerkesztése, megjegyzés, fotó, megosztás"
-                              >
-                                <Edit3 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Notes / Photos preview badge */}
-                          {(hasNotes || hasPhotos) && (
-                            <div className="flex items-center gap-2 pt-0.5 pl-8 flex-wrap text-[11px]">
-                              {hasNotes && (
-                                <div className="flex items-center gap-1 bg-white/70 px-2 py-0.5 rounded-md text-slate-700 font-medium truncate max-w-[200px]">
-                                  <MessageSquare className="w-3 h-3 text-[#0050cb] flex-shrink-0" />
-                                  <span className="truncate">{split.notes}</span>
-                                </div>
-                              )}
-                              {hasPhotos && (
-                                <div className="flex items-center gap-1 bg-white/70 px-2 py-0.5 rounded-md text-[#0050cb] font-bold">
-                                  <Camera className="w-3 h-3 flex-shrink-0" />
-                                  <span>{split.photos!.length} fotó</span>
+                              {/* Notes / Photos preview badge */}
+                              {(hasNotes || hasPhotos) && (
+                                <div className="flex items-center gap-2 pt-0.5 pl-2 flex-wrap text-[11px]">
+                                  {hasNotes && (
+                                    <div className="flex items-center gap-1 bg-white/70 px-2 py-0.5 rounded-md text-slate-700 font-medium truncate max-w-[220px]">
+                                      <MessageSquare className="w-3 h-3 text-slate-600 flex-shrink-0" />
+                                      <span className="truncate">{split.notes}</span>
+                                    </div>
+                                  )}
+                                  {hasPhotos && (
+                                    <div className="flex items-center gap-1 bg-white/70 px-2 py-0.5 rounded-md text-blue-700 font-bold">
+                                      <Camera className="w-3 h-3 flex-shrink-0" />
+                                      <span>{split.photos!.length} fotó</span>
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </section>
+                          );
+                        })
+                      )}
+                    </div>
+                  </section>
+                );
+              })()}
             </div>
 
             {/* Right Column for Desktop / Tablet: Full-height Map */}
@@ -346,7 +384,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 <OsmMap
                   coordinates={selectedSession.coordinates}
                   currentLocation={null}
-                  splits={selectedSession.splits}
+                  splits={getFullSessionSplits(selectedSession)}
                   mapLayer={settings.mapLayer}
                   interactive={true}
                   focusedSplitId={focusedSplitId}

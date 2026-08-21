@@ -38,6 +38,7 @@ import {
   getCumulativeDistanceForSplit,
   exportToGPX,
   calculateReferenceMetrics,
+  getFullSessionSplits,
   ReferenceTrackMetrics,
 } from '../utils/geoUtils';
 
@@ -127,6 +128,11 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
     if (!loadedSession) return null;
     return calculateReferenceMetrics(currentLocation, loadedSession, settings.unit);
   }, [loadedSession, currentLocation, settings.unit]);
+
+  const loadedSessionSplits = useMemo(() => {
+    if (!loadedSession) return undefined;
+    return getFullSessionSplits(loadedSession);
+  }, [loadedSession]);
 
   const getActivityIcon = (mode: ActivityMode) => {
     switch (mode) {
@@ -570,7 +576,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                   <span>Rögzített ({splits.length})</span>
                 </button>
 
-                {loadedSession && loadedSession.splits && loadedSession.splits.length > 0 && (
+                {loadedSession && (
                   <button
                     type="button"
                     onClick={() => setSplitsTab('loaded')}
@@ -581,7 +587,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                     }`}
                   >
                     <Target className="w-3.5 h-3.5 text-purple-600" />
-                    <span>Betöltött Pontok ({loadedSession.splits.length})</span>
+                    <span>Betöltött Pontok ({referenceMetrics?.splitsProgress.length || loadedSessionSplits?.length || 0})</span>
                   </button>
                 )}
               </div>
@@ -731,6 +737,8 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                   {referenceMetrics.splitsProgress.map((sp, idx) => {
                     const isNext = referenceMetrics.nextSplit?.split.id === sp.split.id;
                     const isFocused = focusedSplitId === sp.split.id;
+                    const isStart = sp.split.id.startsWith('start') || sp.split.splitIndex === 0 || sp.split.formattedIndex === 'START';
+                    const isStop = sp.split.id.startsWith('stop') || sp.split.formattedIndex === 'CÉL';
 
                     return (
                       <div
@@ -742,18 +750,38 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                             : sp.isReached
                             ? 'bg-emerald-50/70 border-l-emerald-500'
                             : isFocused
-                            ? 'bg-purple-50 border-l-purple-500 ring-1 ring-purple-300'
+                            ? isStart
+                              ? 'bg-emerald-100/80 border-l-emerald-600 ring-1 ring-emerald-400'
+                              : isStop
+                              ? 'bg-rose-100/80 border-l-rose-600 ring-1 ring-rose-400'
+                              : 'bg-purple-50 border-l-purple-500 ring-1 ring-purple-300'
+                            : isStart
+                            ? 'bg-emerald-50/50 border-l-emerald-400 hover:bg-emerald-50'
+                            : isStop
+                            ? 'bg-rose-50/50 border-l-rose-400 hover:bg-rose-50'
                             : 'bg-white border-l-purple-300 hover:bg-purple-50/40'
                         }`}
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2.5 min-w-0">
-                            <span className={`text-base font-black w-6 text-center select-none font-heading flex-shrink-0 ${isNext ? 'text-purple-700' : sp.isReached ? 'text-emerald-600' : 'text-slate-400'}`}>
-                              {sp.isReached ? '✓' : `#${sp.split.formattedIndex || idx + 1}`}
+                            <span
+                              className={`text-xs font-black px-2 py-0.5 rounded-md text-center font-heading flex-shrink-0 ${
+                                isStart
+                                  ? 'bg-emerald-600 text-white'
+                                  : isStop
+                                  ? 'bg-rose-600 text-white'
+                                  : isNext
+                                  ? 'bg-purple-700 text-white'
+                                  : sp.isReached
+                                  ? 'bg-emerald-500 text-white'
+                                  : 'bg-slate-200 text-slate-700'
+                              }`}
+                            >
+                              {isStart ? '🚩 START' : isStop ? '🏁 CÉL' : sp.isReached ? '✓' : `#${sp.split.formattedIndex || idx}`}
                             </span>
                             <div className="min-w-0">
                               <div className="text-xs font-black text-slate-800 truncate font-heading flex items-center gap-1.5">
-                                <span>{sp.split.name || `Ellenőrzőpont #${idx + 1}`}</span>
+                                <span>{sp.split.name || (isStart ? 'Kezdőpont' : isStop ? 'Cél / Végpont' : `Ellenőrzőpont #${idx}`)}</span>
                                 {isNext && (
                                   <span className="text-[9.5px] uppercase bg-purple-600 text-white font-extrabold px-1.5 py-0.2 rounded-md">
                                     Következő
@@ -761,7 +789,13 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                                 )}
                               </div>
                               <div className="flex items-baseline gap-2 text-[11px] text-slate-500 mt-0.5">
-                                <span>Táv az útvonalon: {sp.split.formattedDistance || `${sp.split.distanceKm} km`}</span>
+                                <span>
+                                  {isStart
+                                    ? '0.00 km (Startvonal)'
+                                    : isStop
+                                    ? `Célvonal (${sp.split.formattedDistance || `${sp.split.distanceKm} km`})`
+                                    : `Táv az útvonalon: ${sp.split.formattedDistance || `${sp.split.distanceKm} km`}`}
+                                </span>
                               </div>
                             </div>
                           </div>
@@ -793,7 +827,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
             currentLocation={currentLocation}
             splits={splits}
             referenceCoordinates={loadedSession?.coordinates}
-            referenceSplits={loadedSession?.splits}
+            referenceSplits={loadedSessionSplits}
             referenceTitle={loadedSession?.title}
             mapLayer={settings.mapLayer}
             isTracking={trackingStatus === 'running'}
@@ -830,7 +864,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                   🎯 {loadedSession.title}
                 </div>
                 <div className="text-[10px] text-purple-800 font-medium truncate">
-                  {formatDistanceByUnit(loadedSession.totalDistanceKm, settings.unit).value} {formatDistanceByUnit(loadedSession.totalDistanceKm, settings.unit).unitLabel} • {loadedSession.splits?.length || 0} pont
+                  {formatDistanceByUnit(loadedSession.totalDistanceKm, settings.unit).value} {formatDistanceByUnit(loadedSession.totalDistanceKm, settings.unit).unitLabel} • {referenceMetrics?.splitsProgress.length || loadedSessionSplits?.length || 0} pont
                 </div>
               </div>
             </div>
@@ -853,7 +887,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
             currentLocation={currentLocation}
             splits={splits}
             referenceCoordinates={loadedSession?.coordinates}
-            referenceSplits={loadedSession?.splits}
+            referenceSplits={loadedSessionSplits}
             referenceTitle={loadedSession?.title}
             mapLayer={settings.mapLayer}
             isTracking={trackingStatus === 'running'}
@@ -1064,6 +1098,9 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
               /* If no live splits yet but track is loaded, show loaded track checkpoints on mobile */
               referenceMetrics.splitsProgress.map((sp, idx) => {
                 const isNext = referenceMetrics.nextSplit?.split.id === sp.split.id;
+                const isStart = sp.split.id.startsWith('start') || sp.split.splitIndex === 0 || sp.split.formattedIndex === 'START';
+                const isStop = sp.split.id.startsWith('stop') || sp.split.formattedIndex === 'CÉL';
+
                 return (
                   <div
                     key={sp.split.id || idx}
@@ -1071,17 +1108,31 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                     className={`rounded-xl p-2 border-l-4 shadow-2xs flex items-center justify-between transition-all ${
                       isNext
                         ? 'bg-purple-100 border-l-purple-600 ring-1 ring-purple-400'
+                        : isStart
+                        ? 'bg-emerald-50 border-l-emerald-500'
+                        : isStop
+                        ? 'bg-rose-50 border-l-rose-500'
                         : sp.isReached
                         ? 'bg-emerald-50 border-l-emerald-500'
                         : 'bg-white border-l-purple-300'
                     }`}
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-xs font-bold text-purple-700">
-                        {sp.isReached ? '✓' : `#${idx + 1}`}
+                      <span
+                        className={`text-xs font-black px-1.5 py-0.2 rounded-md ${
+                          isStart
+                            ? 'bg-emerald-600 text-white'
+                            : isStop
+                            ? 'bg-rose-600 text-white'
+                            : sp.isReached
+                            ? 'bg-emerald-500 text-white'
+                            : 'bg-purple-100 text-purple-700'
+                        }`}
+                      >
+                        {isStart ? 'START' : isStop ? 'CÉL' : sp.isReached ? '✓' : `#${sp.split.formattedIndex || idx}`}
                       </span>
                       <span className="text-xs font-bold text-slate-800 truncate">
-                        {sp.split.name || `Pont #${idx + 1}`}
+                        {sp.split.name || (isStart ? 'Kezdőpont' : isStop ? 'Cél / Végpont' : `Pont #${idx}`)}
                       </span>
                     </div>
                     <span className="text-xs font-bold font-mono text-purple-700">

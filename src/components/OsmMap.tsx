@@ -233,6 +233,11 @@ export const OsmMap: React.FC<OsmMapProps> = ({
     referenceMarkersGroupRef.current.clearLayers();
 
     if (refLatLngs.length > 0) {
+      const startSplit = referenceSplits?.find((s) => s.id.startsWith('start') || s.splitIndex === 0);
+      const stopSplit = referenceSplits?.find(
+        (s) => s.id.startsWith('stop') || s.formattedIndex === 'CÉL' || s.splitIndex === (referenceSplits?.length || 0)
+      );
+
       // 1. Reference Start Marker
       const refStartPos = refLatLngs[0];
       const refStartIcon = L.divIcon({
@@ -252,10 +257,40 @@ export const OsmMap: React.FC<OsmMapProps> = ({
       });
       const startM = L.marker(refStartPos, { icon: refStartIcon, zIndexOffset: 450 }).bindPopup(`
         <div style="font-family: sans-serif; font-size: 12px; font-weight: bold; color: #6d28d9; padding: 2px;">
-          🎯 Betöltött Útvonal START
+          🎯 Betöltött Útvonal START (Indulás)
         </div>
       `);
+
+      if (onSelectSplit) {
+        startM.on('click', () => {
+          onSelectSplit(
+            startSplit || {
+              id: 'start-ref',
+              splitIndex: 0,
+              formattedIndex: 'START',
+              name: '🚩 Ref-START (Kezdőpont)',
+              distanceKm: 0,
+              formattedDistance: '0.00 km',
+              timeSec: 0,
+              formattedTime: '00:00',
+              paceSecPerKm: 0,
+              totalDistanceKm: 0,
+              totalTimeSec: 0,
+              timestamp: Date.now(),
+              coordinate: referenceCoordinates[0],
+              notes: 'Betöltött útvonal kezdőpontja',
+            }
+          );
+        });
+      }
+
       referenceMarkersGroupRef.current.addLayer(startM);
+      splitMarkersMapRef.current.set('start-ref', startM);
+      splitMarkersMapRef.current.set('ref-start', startM);
+      splitMarkersMapRef.current.set('start', startM);
+      if (startSplit?.id) {
+        splitMarkersMapRef.current.set(startSplit.id, startM);
+      }
 
       // 2. Reference Finish Marker
       if (refLatLngs.length > 1) {
@@ -277,15 +312,56 @@ export const OsmMap: React.FC<OsmMapProps> = ({
         });
         const endM = L.marker(refEndPos, { icon: refEndIcon, zIndexOffset: 450 }).bindPopup(`
           <div style="font-family: sans-serif; font-size: 12px; font-weight: bold; color: #be185d; padding: 2px;">
-            🏁 Betöltött Útvonal CÉL
+            🏁 Betöltött Útvonal CÉL (Végpont)
           </div>
         `);
+
+        if (onSelectSplit) {
+          endM.on('click', () => {
+            onSelectSplit(
+              stopSplit || {
+                id: 'stop-ref',
+                splitIndex: 999,
+                formattedIndex: 'CÉL',
+                name: '🏁 Ref-CÉL (Végpont)',
+                distanceKm: 0,
+                formattedDistance: '0.00 km',
+                timeSec: 0,
+                formattedTime: '00:00',
+                paceSecPerKm: 0,
+                totalDistanceKm: 0,
+                totalTimeSec: 0,
+                timestamp: Date.now(),
+                coordinate: referenceCoordinates[referenceCoordinates.length - 1],
+                notes: 'Betöltött útvonal célvonala',
+              }
+            );
+          });
+        }
+
         referenceMarkersGroupRef.current.addLayer(endM);
+        splitMarkersMapRef.current.set('stop-ref', endM);
+        splitMarkersMapRef.current.set('ref-stop', endM);
+        splitMarkersMapRef.current.set('ref-end', endM);
+        splitMarkersMapRef.current.set('stop', endM);
+        if (stopSplit?.id) {
+          splitMarkersMapRef.current.set(stopSplit.id, endM);
+        }
       }
 
-      // 3. Reference Splits / Waypoints Markers
+      // 3. Reference Intermediate Splits / Waypoints Markers (excluding duplicate Start and Stop badges)
       if (referenceSplits && referenceSplits.length > 0) {
         referenceSplits.forEach((split, idx) => {
+          if (
+            split.id.startsWith('start') ||
+            split.id.startsWith('stop') ||
+            split.formattedIndex === 'START' ||
+            split.formattedIndex === 'CÉL' ||
+            split.splitIndex === 0
+          ) {
+            return;
+          }
+
           let sLoc = split.coordinate;
           if (!sLoc && referenceCoordinates.length > 0) {
             const fraction = (idx + 1) / Math.max(1, referenceSplits.length);
@@ -434,6 +510,32 @@ export const OsmMap: React.FC<OsmMapProps> = ({
         startMarkerRef.current.setLatLng(startLatLng);
         startMarkerRef.current.setIcon(startIcon);
       }
+
+      if (onSelectSplit && startMarkerRef.current) {
+        startMarkerRef.current.off('click');
+        startMarkerRef.current.on('click', () => {
+          const startSplit = splits?.find((s) => s.id.startsWith('start') || s.splitIndex === 0) || {
+            id: 'start-point',
+            splitIndex: 0,
+            formattedIndex: 'START',
+            name: '🚩 START Pont (Indulás)',
+            distanceKm: 0,
+            formattedDistance: '0.00 km',
+            timeSec: 0,
+            formattedTime: '00:00',
+            paceSecPerKm: 0,
+            totalDistanceKm: 0,
+            totalTimeSec: 0,
+            timestamp: coordinates[0]?.timestamp || Date.now(),
+            coordinate: coordinates[0],
+            notes: 'Automatikusan rögzített kezdőpont',
+          };
+          onSelectSplit(startSplit);
+        });
+      }
+
+      splitMarkersMapRef.current.set('start', startMarkerRef.current);
+      splitMarkersMapRef.current.set('start-point', startMarkerRef.current);
     } else if (startMarkerRef.current) {
       mapRef.current.removeLayer(startMarkerRef.current);
       startMarkerRef.current = null;
@@ -506,6 +608,34 @@ export const OsmMap: React.FC<OsmMapProps> = ({
         stopMarkerRef.current.setLatLng(stopLatLng);
         stopMarkerRef.current.setIcon(stopIcon);
       }
+
+      if (onSelectSplit && stopMarkerRef.current) {
+        stopMarkerRef.current.off('click');
+        stopMarkerRef.current.on('click', () => {
+          const stopSplit = splits?.find(
+            (s) => s.id.startsWith('stop') || s.formattedIndex === 'CÉL' || s.splitIndex === (splits?.length || 0)
+          ) || {
+            id: 'stop-point',
+            splitIndex: 999,
+            formattedIndex: 'STOP',
+            name: '🏁 STOP Pont (Cél)',
+            distanceKm: 0,
+            formattedDistance: '0.00 km',
+            timeSec: 0,
+            formattedTime: '00:00',
+            paceSecPerKm: 0,
+            totalDistanceKm: 0,
+            totalTimeSec: 0,
+            timestamp: coordinates[coordinates.length - 1]?.timestamp || Date.now(),
+            coordinate: coordinates[coordinates.length - 1],
+            notes: 'Automatikusan rögzített célvonal',
+          };
+          onSelectSplit(stopSplit);
+        });
+      }
+
+      splitMarkersMapRef.current.set('stop', stopMarkerRef.current);
+      splitMarkersMapRef.current.set('stop-point', stopMarkerRef.current);
     } else if (stopMarkerRef.current) {
       mapRef.current.removeLayer(stopMarkerRef.current);
       stopMarkerRef.current = null;
@@ -733,6 +863,26 @@ export const OsmMap: React.FC<OsmMapProps> = ({
           !isNaN(targetSplit.coordinate.lng)
         ) {
           targetLatLng = [targetSplit.coordinate.lat, targetSplit.coordinate.lng];
+        } else if (focusedSplitId.startsWith('start') || focusedSplitId === 'ref-start' || focusedSplitId === 'start-ref') {
+          if (coordinates.length > 0) {
+            targetLatLng = [coordinates[0].lat, coordinates[0].lng];
+          } else if (referenceCoordinates.length > 0) {
+            targetLatLng = [referenceCoordinates[0].lat, referenceCoordinates[0].lng];
+          }
+          targetMarker = startMarkerRef.current || splitMarkersMapRef.current.get('start-ref') || splitMarkersMapRef.current.get('start') || null;
+        } else if (
+          focusedSplitId.startsWith('stop') ||
+          focusedSplitId.startsWith('end') ||
+          focusedSplitId === 'ref-stop' ||
+          focusedSplitId === 'ref-end' ||
+          focusedSplitId === 'stop-ref'
+        ) {
+          if (coordinates.length > 0) {
+            targetLatLng = [coordinates[coordinates.length - 1].lat, coordinates[coordinates.length - 1].lng];
+          } else if (referenceCoordinates.length > 0) {
+            targetLatLng = [referenceCoordinates[referenceCoordinates.length - 1].lat, referenceCoordinates[referenceCoordinates.length - 1].lng];
+          }
+          targetMarker = stopMarkerRef.current || splitMarkersMapRef.current.get('stop-ref') || splitMarkersMapRef.current.get('stop') || null;
         }
       }
 
