@@ -9,6 +9,9 @@ interface OsmMapProps {
   coordinates: Coordinate[];
   currentLocation: Coordinate | null;
   splits?: Split[];
+  referenceCoordinates?: Coordinate[];
+  referenceSplits?: Split[];
+  referenceTitle?: string;
   mapLayer?: MapLayerType;
   isTracking?: boolean;
   className?: string;
@@ -25,6 +28,9 @@ export const OsmMap: React.FC<OsmMapProps> = ({
   coordinates,
   currentLocation,
   splits = [],
+  referenceCoordinates = [],
+  referenceSplits = [],
+  referenceTitle = '',
   mapLayer = 'osm',
   isTracking = false,
   className = '',
@@ -41,10 +47,13 @@ export const OsmMap: React.FC<OsmMapProps> = ({
   const tileLayerRef = useRef<L.TileLayer | null>(null);
   const polylineRef = useRef<L.Polyline | null>(null);
   const polylineCasingRef = useRef<L.Polyline | null>(null);
+  const referencePolylineRef = useRef<L.Polyline | null>(null);
+  const referencePolylineCasingRef = useRef<L.Polyline | null>(null);
   const currentMarkerRef = useRef<L.Marker | null>(null);
   const startMarkerRef = useRef<L.Marker | null>(null);
   const stopMarkerRef = useRef<L.Marker | null>(null);
   const splitMarkersGroupRef = useRef<L.LayerGroup | null>(null);
+  const referenceMarkersGroupRef = useRef<L.LayerGroup | null>(null);
   const splitMarkersMapRef = useRef<Map<string, L.Marker>>(new Map());
   const hasInitialCenteredRef = useRef<boolean>(false);
   const [showLayersMenu, setShowLayersMenu] = useState(false);
@@ -105,6 +114,8 @@ export const OsmMap: React.FC<OsmMapProps> = ({
       ? [currentLocation.lat, currentLocation.lng]
       : coordinates.length > 0
       ? [coordinates[coordinates.length - 1].lat, coordinates[coordinates.length - 1].lng]
+      : referenceCoordinates.length > 0
+      ? [referenceCoordinates[0].lat, referenceCoordinates[0].lng]
       : [37.7775, -122.4164]; // San Francisco default
 
     const map = L.map(mapContainerRef.current, {
@@ -127,7 +138,27 @@ export const OsmMap: React.FC<OsmMapProps> = ({
 
     tileLayerRef.current = tileLayer;
 
-    // Polyline casing (shadow/border for high contrast on all map layers)
+    // Reference / Loaded Track Polylines (purple dashed guide line)
+    const refPolyCasing = L.polyline([], {
+      color: '#ffffff',
+      weight: 6,
+      opacity: 0.85,
+      lineCap: 'round',
+      lineJoin: 'round',
+    }).addTo(map);
+    referencePolylineCasingRef.current = refPolyCasing;
+
+    const refPoly = L.polyline([], {
+      color: '#7c3aed',
+      weight: 4,
+      opacity: 0.9,
+      dashArray: '8, 6',
+      lineCap: 'round',
+      lineJoin: 'round',
+    }).addTo(map);
+    referencePolylineRef.current = refPoly;
+
+    // Active Live Polyline casing (shadow/border for high contrast on all map layers)
     const polylineCasing = L.polyline([], {
       color: '#ffffff',
       weight: 7,
@@ -182,6 +213,123 @@ export const OsmMap: React.FC<OsmMapProps> = ({
 
     tileLayerRef.current = newTileLayer;
   }, [internalLayer]);
+
+  // Update Reference / Loaded Track Layer & Markers
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    const refLatLngs: [number, number][] = referenceCoordinates.map((c) => [c.lat, c.lng]);
+
+    if (referencePolylineCasingRef.current) {
+      referencePolylineCasingRef.current.setLatLngs(refLatLngs);
+    }
+    if (referencePolylineRef.current) {
+      referencePolylineRef.current.setLatLngs(refLatLngs);
+    }
+
+    if (!referenceMarkersGroupRef.current) {
+      referenceMarkersGroupRef.current = L.layerGroup().addTo(mapRef.current);
+    }
+    referenceMarkersGroupRef.current.clearLayers();
+
+    if (refLatLngs.length > 0) {
+      // 1. Reference Start Marker
+      const refStartPos = refLatLngs[0];
+      const refStartIcon = L.divIcon({
+        className: 'custom-ref-start-badge',
+        html: `
+          <div style="position: relative; display: flex; flex-direction: column; align-items: center; width: 84px; cursor: pointer; user-select: none;">
+            <div style="display: inline-flex; align-items: center; gap: 3px; background: #6d28d9; color: #ffffff; font-family: ui-sans-serif, system-ui, sans-serif; font-weight: 800; font-size: 10.5px; line-height: 1; padding: 3px 6px; border-radius: 6px; border: 1.5px solid #ffffff; box-shadow: 0 4px 10px rgba(109, 40, 217, 0.45); white-space: nowrap; z-index: 2;">
+              <span>🎯</span>
+              <span>Ref-START</span>
+            </div>
+            <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #6d28d9; margin-top: -1px; z-index: 1;"></div>
+          </div>
+        `,
+        iconSize: [84, 28],
+        iconAnchor: [42, 28],
+        popupAnchor: [0, -28],
+      });
+      const startM = L.marker(refStartPos, { icon: refStartIcon, zIndexOffset: 450 }).bindPopup(`
+        <div style="font-family: sans-serif; font-size: 12px; font-weight: bold; color: #6d28d9; padding: 2px;">
+          🎯 Betöltött Útvonal START
+        </div>
+      `);
+      referenceMarkersGroupRef.current.addLayer(startM);
+
+      // 2. Reference Finish Marker
+      if (refLatLngs.length > 1) {
+        const refEndPos = refLatLngs[refLatLngs.length - 1];
+        const refEndIcon = L.divIcon({
+          className: 'custom-ref-end-badge',
+          html: `
+            <div style="position: relative; display: flex; flex-direction: column; align-items: center; width: 78px; cursor: pointer; user-select: none;">
+              <div style="display: inline-flex; align-items: center; gap: 3px; background: #be185d; color: #ffffff; font-family: ui-sans-serif, system-ui, sans-serif; font-weight: 800; font-size: 10.5px; line-height: 1; padding: 3px 6px; border-radius: 6px; border: 1.5px solid #ffffff; box-shadow: 0 4px 10px rgba(190, 24, 93, 0.45); white-space: nowrap; z-index: 2;">
+                <span>🏁</span>
+                <span>Ref-CÉL</span>
+              </div>
+              <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #be185d; margin-top: -1px; z-index: 1;"></div>
+            </div>
+          `,
+          iconSize: [78, 28],
+          iconAnchor: [39, 28],
+          popupAnchor: [0, -28],
+        });
+        const endM = L.marker(refEndPos, { icon: refEndIcon, zIndexOffset: 450 }).bindPopup(`
+          <div style="font-family: sans-serif; font-size: 12px; font-weight: bold; color: #be185d; padding: 2px;">
+            🏁 Betöltött Útvonal CÉL
+          </div>
+        `);
+        referenceMarkersGroupRef.current.addLayer(endM);
+      }
+
+      // 3. Reference Splits / Waypoints Markers
+      if (referenceSplits && referenceSplits.length > 0) {
+        referenceSplits.forEach((split, idx) => {
+          let sLoc = split.coordinate;
+          if (!sLoc && referenceCoordinates.length > 0) {
+            const fraction = (idx + 1) / Math.max(1, referenceSplits.length);
+            const cIdx = Math.min(referenceCoordinates.length - 1, Math.floor(fraction * (referenceCoordinates.length - 1)));
+            sLoc = referenceCoordinates[cIdx];
+          }
+          if (sLoc) {
+            const badgeLabel = split.name
+              ? (split.name.length > 10 ? split.name.slice(0, 9) + '…' : split.name)
+              : `🎯 ${split.formattedIndex || split.splitIndex}`;
+            const sIcon = L.divIcon({
+              className: 'custom-ref-split-badge',
+              html: `
+                <div style="position: relative; display: flex; flex-direction: column; align-items: center; width: 70px; cursor: pointer; user-select: none;">
+                  <div style="display: inline-flex; align-items: center; gap: 2px; background: #5b21b6; color: #ffffff; font-family: ui-sans-serif, system-ui, sans-serif; font-weight: 800; font-size: 10px; line-height: 1; padding: 3px 5px; border-radius: 5px; border: 1.5px solid #ffffff; box-shadow: 0 3px 8px rgba(91, 33, 182, 0.4); white-space: nowrap; z-index: 2;">
+                    <span>🎯</span>
+                    <span>${badgeLabel}</span>
+                  </div>
+                  <div style="width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #5b21b6; margin-top: -1px; z-index: 1;"></div>
+                </div>
+              `,
+              iconSize: [70, 26],
+              iconAnchor: [35, 26],
+              popupAnchor: [0, -26],
+            });
+            const sMarker = L.marker([sLoc.lat, sLoc.lng], { icon: sIcon, zIndexOffset: 460 }).bindPopup(`
+              <div style="font-family: sans-serif; font-size: 12px; padding: 2px 4px;">
+                <div style="font-weight: 800; color: #5b21b6;">🎯 ${split.name || `Betöltött Pont #${split.formattedIndex || split.splitIndex}`}</div>
+                <div style="color: #475569; font-size: 11px; margin-top: 2px;">Táv: ${split.formattedDistance || split.distanceKm + ' km'}</div>
+                ${split.notes ? `<div style="color: #64748b; font-size: 11px; margin-top: 2px; font-style: italic;">${split.notes}</div>` : ''}
+              </div>
+            `);
+            referenceMarkersGroupRef.current?.addLayer(sMarker);
+          }
+        });
+      }
+
+      // If active track is empty and not tracking, fit map bounds to reference track
+      if (coordinates.length === 0 && !isTracking) {
+        const bounds = L.latLngBounds(refLatLngs);
+        mapRef.current.fitBounds(bounds, { padding: [35, 35], maxZoom: 16 });
+      }
+    }
+  }, [referenceCoordinates, referenceSplits, coordinates.length, isTracking]);
 
   // Update Polyline and Markers
   useEffect(() => {

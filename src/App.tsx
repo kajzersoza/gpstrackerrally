@@ -111,6 +111,18 @@ export default function App() {
     return DEFAULT_PROFILE;
   });
 
+  // Loaded Track / Reference Track state (from History or Cloud)
+  const [loadedSession, setLoadedSession] = useState<ActivitySession | null>(null);
+
+  const handleLoadSessionForTracking = (session: ActivitySession) => {
+    setLoadedSession(session);
+    setActiveTab('activity');
+  };
+
+  const handleUnloadSession = () => {
+    setLoadedSession(null);
+  };
+
   const handleUpdateProfile = (newProfile: Partial<UserProfile>) => {
     setUserProfile((prev) => {
       const updated = { ...prev, ...newProfile };
@@ -826,6 +838,8 @@ export default function App() {
             currentSplitTimeSec={currentSplitTimeSec}
             currentSplitDistanceKm={currentSplitDistanceKm}
             settings={settings}
+            loadedSession={loadedSession}
+            onUnloadSession={handleUnloadSession}
             onStart={handleStart}
             onPause={handlePause}
             onResume={handleResume}
@@ -851,6 +865,7 @@ export default function App() {
             onBack={() => setActiveTab('activity')}
             onOpenCloudShare={handleOpenCloudShare}
             onOpenCloudLoad={handleOpenCloudLoad}
+            onLoadSessionForTracking={handleLoadSessionForTracking}
           />
         )}
 

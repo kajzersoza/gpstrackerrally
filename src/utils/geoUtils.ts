@@ -1,4 +1,4 @@
-import { Coordinate, Split } from '../types';
+import { Coordinate, Split, ActivitySession } from '../types';
 
 /**
  * Calculates Haversine distance between two points in kilometers
@@ -361,6 +361,188 @@ export function exportToGPX(
 </gpx>`;
 
   return `${gpxHeader}\n${trkpts}${gpxFooter}`;
+}
+
+/**
+ * Calculates initial bearing from point 1 to point 2 in degrees (0..360)
+ */
+export function calculateBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const lat1Rad = lat1 * (Math.PI / 180);
+  const lat2Rad = lat2 * (Math.PI / 180);
+
+  const y = Math.sin(dLon) * Math.cos(lat2Rad);
+  const x = Math.cos(lat1Rad) * Math.sin(lat2Rad) -
+            Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(dLon);
+  const brng = Math.atan2(y, x);
+  return ((brng * 180 / Math.PI) + 360) % 360;
+}
+
+/**
+ * Converts degrees into 16-point Hungarian compass direction label
+ */
+export function getCompassDirection(bearingDeg: number): string {
+  const directions = ['É', 'ÉÉK', 'ÉK', 'KÉK', 'K', 'KDK', 'DK', 'DDK', 'D', 'DDNY', 'DNY', 'NYDNY', 'NY', 'NYÉNY', 'ÉNY', 'ÉÉNY'];
+  const index = Math.round(bearingDeg / 22.5) % 16;
+  return directions[index] || 'É';
+}
+
+export interface ReferenceTrackMetrics {
+  distanceFromStartKm: number;
+  distanceFromStartMeters: number;
+  formattedDistanceFromStart: string; // e.g. "+1.25 km" or "+1 250 m"
+  distanceToEndKm: number;
+  distanceToEndMeters: number;
+  formattedDistanceToEnd: string; // e.g. "-3.42 km" or "-3 420 m"
+  nextSplit: {
+    split: Split;
+    index: number;
+    total: number;
+    name: string;
+    distanceKm: number;
+    distanceMeters: number;
+    formattedRelative: string; // e.g. "-352 m"
+    bearingDeg: number;
+    bearingCompass: string;
+    isReached: boolean;
+  } | null;
+  splitsProgress: Array<{
+    split: Split;
+    distanceMeters: number;
+    formattedDistance: string;
+    formattedRelative: string;
+    isReached: boolean;
+    bearingCompass: string;
+  }>;
+  closestCoordinate: Coordinate | null;
+  crossTrackDistanceMeters: number;
+  progressPercent: number;
+}
+
+/**
+ * Calculates dynamic metrics relative to a loaded reference track
+ */
+export function calculateReferenceMetrics(
+  currentLoc: Coordinate | null,
+  referenceSession: ActivitySession,
+  unit: 'km' | 'm' | 'mi' = 'm'
+): ReferenceTrackMetrics | null {
+  const coords = referenceSession.coordinates;
+  if (!coords || coords.length === 0) return null;
+
+  const startCoord = coords[0];
+  const endCoord = coords[coords.length - 1];
+
+  const activePos = currentLoc || startCoord;
+
+  // Distance from reference Start
+  const distFromStartKm = calculateDistance(startCoord.lat, startCoord.lng, activePos.lat, activePos.lng);
+  const distFromStartMeters = Math.round(distFromStartKm * 1000);
+  const formattedStartObj = formatDistanceByUnit(distFromStartKm, unit);
+  const formattedDistanceFromStart = `+${formattedStartObj.value} ${formattedStartObj.unitLabel}`;
+
+  // Distance to reference End/Stop
+  const distToEndKm = calculateDistance(activePos.lat, activePos.lng, endCoord.lat, endCoord.lng);
+  const distToEndMeters = Math.round(distToEndKm * 1000);
+  const formattedEndObj = formatDistanceByUnit(distToEndKm, unit);
+  const formattedDistanceToEnd = `-${formattedEndObj.value} ${formattedEndObj.unitLabel}`;
+
+  // Find closest coordinate along the reference path
+  let minDistanceToPath = Infinity;
+  let closestCoord: Coordinate = coords[0];
+  let closestIndex = 0;
+
+  for (let i = 0; i < coords.length; i++) {
+    const d = calculateDistance(activePos.lat, activePos.lng, coords[i].lat, coords[i].lng);
+    if (d < minDistanceToPath) {
+      minDistanceToPath = d;
+      closestCoord = coords[i];
+      closestIndex = i;
+    }
+  }
+
+  const crossTrackDistanceMeters = Math.round(minDistanceToPath * 1000);
+  const progressPercent = Math.min(100, Math.max(0, Math.round((closestIndex / Math.max(1, coords.length - 1)) * 100)));
+
+  // Calculate splits progress
+  const refSplits = referenceSession.splits || [];
+  // Sort reference splits by index
+  const sortedSplits = [...refSplits].sort((a, b) => a.splitIndex - b.splitIndex);
+
+  const PROXIMITY_THRESHOLD_METERS = 35; // within 35 meters is considered reached
+  let nextSplitObj: ReferenceTrackMetrics['nextSplit'] = null;
+
+  const splitsProgress = sortedSplits.map((split, idx) => {
+    let splitCoord = split.coordinate;
+    if (!splitCoord) {
+      // Find approximate coordinate from reference track coordinates
+      const fraction = (idx + 1) / Math.max(1, sortedSplits.length);
+      const cIdx = Math.min(coords.length - 1, Math.floor(fraction * (coords.length - 1)));
+      splitCoord = coords[cIdx];
+    }
+
+    const distKm = splitCoord
+      ? calculateDistance(activePos.lat, activePos.lng, splitCoord.lat, splitCoord.lng)
+      : 0;
+    const distMeters = Math.round(distKm * 1000);
+    const bearingDeg = splitCoord ? calculateBearing(activePos.lat, activePos.lng, splitCoord.lat, splitCoord.lng) : 0;
+    const bearingCompass = getCompassDirection(bearingDeg);
+
+    // Is it reached? If user is past this split's position or within threshold
+    const isReached = distMeters <= PROXIMITY_THRESHOLD_METERS;
+
+    // Formatting for display: e.g. "-352 m" if not reached
+    const relObj = formatDistanceByUnit(distKm, unit);
+    const formattedRelative = isReached ? '✓ Érintve' : `-${relObj.value} ${relObj.unitLabel}`;
+
+    return {
+      split,
+      distanceMeters: distMeters,
+      formattedDistance: `${relObj.value} ${relObj.unitLabel}`,
+      formattedRelative,
+      isReached,
+      bearingCompass,
+    };
+  });
+
+  // Identify next unreached split
+  const firstUnreached = splitsProgress.find((sp) => !sp.isReached);
+  if (firstUnreached) {
+    const split = firstUnreached.split;
+    const splitCoord = split.coordinate || closestCoord;
+    const distKm = calculateDistance(activePos.lat, activePos.lng, splitCoord.lat, splitCoord.lng);
+    const distMeters = Math.round(distKm * 1000);
+    const bearingDeg = calculateBearing(activePos.lat, activePos.lng, splitCoord.lat, splitCoord.lng);
+    const bearingCompass = getCompassDirection(bearingDeg);
+    const relObj = formatDistanceByUnit(distKm, unit);
+
+    nextSplitObj = {
+      split,
+      index: split.splitIndex || (sortedSplits.indexOf(split) + 1),
+      total: sortedSplits.length,
+      name: split.name || `#${split.formattedIndex || split.splitIndex}`,
+      distanceKm: distKm,
+      distanceMeters: distMeters,
+      formattedRelative: `-${relObj.value} ${relObj.unitLabel}`,
+      bearingDeg,
+      bearingCompass,
+      isReached: false,
+    };
+  }
+
+  return {
+    distanceFromStartKm: distFromStartKm,
+    distanceFromStartMeters: distFromStartMeters,
+    formattedDistanceFromStart,
+    distanceToEndKm: distToEndKm,
+    distanceToEndMeters: distToEndMeters,
+    formattedDistanceToEnd,
+    nextSplit: nextSplitObj,
+    splitsProgress,
+    closestCoordinate: closestCoord,
+    crossTrackDistanceMeters,
+    progressPercent,
+  };
 }
 
 function escapeXml(unsafe: string): string {

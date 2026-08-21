@@ -16,6 +16,8 @@ import {
   CloudUpload,
   CloudDownload,
   Share2,
+  Navigation,
+  Play,
 } from 'lucide-react';
 import { ActivitySession, Split, UserSettings, UserProfile } from '../types';
 import {
@@ -36,6 +38,7 @@ interface HistoryViewProps {
   onBack: () => void;
   onOpenCloudShare?: (session: ActivitySession) => void;
   onOpenCloudLoad?: () => void;
+  onLoadSessionForTracking?: (session: ActivitySession) => void;
 }
 
 export const HistoryView: React.FC<HistoryViewProps> = ({
@@ -47,6 +50,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onBack,
   onOpenCloudShare,
   onOpenCloudLoad,
+  onLoadSessionForTracking,
 }) => {
   const [selectedSession, setSelectedSession] = useState<ActivitySession | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<ActivitySession | null>(null);
@@ -145,7 +149,19 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             <h2 className="text-base font-black text-slate-800 truncate max-w-[220px] font-heading">
               {selectedSession.title}
             </h2>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
+              {onLoadSessionForTracking && (
+                <button
+                  type="button"
+                  onClick={() => onLoadSessionForTracking(selectedSession)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0060e6] hover:bg-[#0050cb] text-white rounded-xl text-xs font-bold shadow-sm active:scale-95 transition-all cursor-pointer"
+                  title="Útvonal betöltése rögzítéshez és távolság követéshez"
+                >
+                  <Navigation className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Track Betöltése</span>
+                  <span className="sm:hidden">Betöltés</span>
+                </button>
+              )}
               {onOpenCloudShare && (
                 <button
                   type="button"
@@ -457,6 +473,21 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1 pl-2">
+                      {/* Direct Load Track Button on List Card */}
+                      {onLoadSessionForTracking && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onLoadSessionForTracking(session);
+                          }}
+                          className="flex items-center gap-1 px-2.5 py-1.5 bg-[#eaf2ff] hover:bg-[#0060e6] text-[#0060e6] hover:text-white rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-2xs"
+                          title="Betöltés navigációhoz / rögzítéshez"
+                        >
+                          <Navigation className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Betöltés</span>
+                        </button>
+                      )}
                       {/* Cloud Share Button */}
                       {onOpenCloudShare && (
                         <button
