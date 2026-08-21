@@ -766,9 +766,29 @@ export default function App() {
     setSavedSessions((prev) => prev.filter((s) => s.id !== id));
   };
 
-  // Update a split in the active live track
+  // Update a split in the active live track or loaded reference track
   const handleUpdateSplit = (updatedSplit: Split) => {
     setSplits((prev) => prev.map((s) => (s.id === updatedSplit.id ? updatedSplit : s)));
+
+    if (loadedSession) {
+      const existingIndex = (loadedSession.splits || []).findIndex((s) => s.id === updatedSplit.id);
+      let updatedSplits: Split[];
+      if (existingIndex >= 0) {
+        updatedSplits = loadedSession.splits.map((s) => (s.id === updatedSplit.id ? updatedSplit : s));
+      } else {
+        updatedSplits = [...(loadedSession.splits || []), updatedSplit];
+      }
+
+      const updatedSession: ActivitySession = {
+        ...loadedSession,
+        splits: updatedSplits,
+      };
+
+      setLoadedSession(updatedSession);
+      setSavedSessions((prev) =>
+        prev.map((s) => (s.id === loadedSession.id ? updatedSession : s))
+      );
+    }
   };
 
   // Update a session in history (e.g. edited split, notes, photos)

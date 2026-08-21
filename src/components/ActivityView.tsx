@@ -739,6 +739,8 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                     const isFocused = focusedSplitId === sp.split.id;
                     const isStart = sp.split.id.startsWith('start') || sp.split.splitIndex === 0 || sp.split.formattedIndex === 'START';
                     const isStop = sp.split.id.startsWith('stop') || sp.split.formattedIndex === 'CÉL';
+                    const hasNotes = !!sp.split.notes;
+                    const hasPhotos = sp.split.photos && sp.split.photos.length > 0;
 
                     return (
                       <div
@@ -800,15 +802,47 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                             </div>
                           </div>
 
-                          <div className="flex flex-col items-end flex-shrink-0">
-                            <span className={`text-sm font-black font-heading ${isNext ? 'text-purple-700 font-mono text-base' : sp.isReached ? 'text-emerald-600' : 'text-slate-600'}`}>
-                              {sp.formattedRelative}
-                            </span>
-                            <span className="text-[10px] text-slate-400 font-mono">
-                              Irányszög: {sp.bearingCompass}
-                            </span>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <div className="flex flex-col items-end">
+                              <span className={`text-sm font-black font-heading ${isNext ? 'text-purple-700 font-mono text-base' : sp.isReached ? 'text-emerald-600' : 'text-slate-600'}`}>
+                                {sp.formattedRelative}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                Irányszög: {sp.bearingCompass}
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingSplit(sp.split);
+                              }}
+                              className="p-1.5 bg-white/90 hover:bg-white text-slate-700 hover:text-purple-700 rounded-lg shadow-2xs transition-all active:scale-90 cursor-pointer border border-slate-200"
+                              title="Pont részletei, megjegyzések, fotók"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
+
+                        {/* Notes / Photos preview badge */}
+                        {(hasNotes || hasPhotos) && (
+                          <div className="flex items-center gap-2 pt-0.5 pl-2 flex-wrap text-[11px]">
+                            {hasNotes && (
+                              <div className="flex items-center gap-1 bg-white/80 px-2 py-0.5 rounded-md text-slate-700 font-medium truncate max-w-[220px]">
+                                <MessageSquare className="w-3 h-3 text-purple-600 flex-shrink-0" />
+                                <span className="truncate">{sp.split.notes}</span>
+                              </div>
+                            )}
+                            {hasPhotos && (
+                              <div className="flex items-center gap-1 bg-white/80 px-2 py-0.5 rounded-md text-purple-700 font-bold">
+                                <Camera className="w-3 h-3 flex-shrink-0" />
+                                <span>{sp.split.photos!.length} fotó</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -1100,12 +1134,14 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                 const isNext = referenceMetrics.nextSplit?.split.id === sp.split.id;
                 const isStart = sp.split.id.startsWith('start') || sp.split.splitIndex === 0 || sp.split.formattedIndex === 'START';
                 const isStop = sp.split.id.startsWith('stop') || sp.split.formattedIndex === 'CÉL';
+                const hasNotes = !!sp.split.notes;
+                const hasPhotos = sp.split.photos && sp.split.photos.length > 0;
 
                 return (
                   <div
                     key={sp.split.id || idx}
                     onClick={() => setFocusedSplitId(sp.split.id === focusedSplitId ? null : sp.split.id)}
-                    className={`rounded-xl p-2 border-l-4 shadow-2xs flex items-center justify-between transition-all ${
+                    className={`rounded-xl p-2.5 border-l-4 shadow-2xs flex flex-col gap-1 transition-all ${
                       isNext
                         ? 'bg-purple-100 border-l-purple-600 ring-1 ring-purple-400'
                         : isStart
@@ -1117,27 +1153,59 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                         : 'bg-white border-l-purple-300'
                     }`}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        className={`text-xs font-black px-1.5 py-0.2 rounded-md ${
-                          isStart
-                            ? 'bg-emerald-600 text-white'
-                            : isStop
-                            ? 'bg-rose-600 text-white'
-                            : sp.isReached
-                            ? 'bg-emerald-500 text-white'
-                            : 'bg-purple-100 text-purple-700'
-                        }`}
-                      >
-                        {isStart ? 'START' : isStop ? 'CÉL' : sp.isReached ? '✓' : `#${sp.split.formattedIndex || idx}`}
-                      </span>
-                      <span className="text-xs font-bold text-slate-800 truncate">
-                        {sp.split.name || (isStart ? 'Kezdőpont' : isStop ? 'Cél / Végpont' : `Pont #${idx}`)}
-                      </span>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={`text-xs font-black px-1.5 py-0.2 rounded-md flex-shrink-0 ${
+                            isStart
+                              ? 'bg-emerald-600 text-white'
+                              : isStop
+                              ? 'bg-rose-600 text-white'
+                              : sp.isReached
+                              ? 'bg-emerald-500 text-white'
+                              : 'bg-purple-100 text-purple-700'
+                          }`}
+                        >
+                          {isStart ? 'START' : isStop ? 'CÉL' : sp.isReached ? '✓' : `#${sp.split.formattedIndex || idx}`}
+                        </span>
+                        <span className="text-xs font-bold text-slate-800 truncate">
+                          {sp.split.name || (isStart ? 'Kezdőpont' : isStop ? 'Cél / Végpont' : `Pont #${idx}`)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <span className="text-xs font-bold font-mono text-purple-700">
+                          {sp.formattedRelative}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingSplit(sp.split);
+                          }}
+                          className="p-1 bg-white/90 hover:bg-white text-purple-700 rounded-lg shadow-2xs border border-purple-200"
+                          title="Részletek, fotók, megjegyzések"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
-                    <span className="text-xs font-bold font-mono text-purple-700">
-                      {sp.formattedRelative}
-                    </span>
+
+                    {(hasNotes || hasPhotos) && (
+                      <div className="flex items-center gap-2 pl-1.5 text-[10.5px]">
+                        {hasNotes && (
+                          <div className="flex items-center gap-1 text-slate-600 truncate max-w-[190px]">
+                            <MessageSquare className="w-2.5 h-2.5 text-purple-600 flex-shrink-0" />
+                            <span className="truncate">{sp.split.notes}</span>
+                          </div>
+                        )}
+                        {hasPhotos && (
+                          <div className="flex items-center gap-1 text-purple-700 font-bold">
+                            <Camera className="w-2.5 h-2.5 flex-shrink-0" />
+                            <span>{sp.split.photos!.length} fotó</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -1214,7 +1282,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
       {editingSplit && (
         <SplitDetailModal
           split={editingSplit}
-          allSplits={splits}
+          allSplits={splitsTab === 'loaded' ? (loadedSessionSplits || splits) : splits}
           unit={settings.unit}
           presets={settings.pointPresets}
           isOpen={true}

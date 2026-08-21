@@ -240,24 +240,54 @@ export const OsmMap: React.FC<OsmMapProps> = ({
 
       // 1. Reference Start Marker
       const refStartPos = refLatLngs[0];
+      const startHasPhotos = startSplit?.photos && startSplit.photos.length > 0;
+      const startHasNotes = !!startSplit?.notes;
       const refStartIcon = L.divIcon({
         className: 'custom-ref-start-badge',
         html: `
-          <div style="position: relative; display: flex; flex-direction: column; align-items: center; width: 84px; cursor: pointer; user-select: none;">
+          <div style="position: relative; display: flex; flex-direction: column; align-items: center; width: 88px; cursor: pointer; user-select: none;">
             <div style="display: inline-flex; align-items: center; gap: 3px; background: #6d28d9; color: #ffffff; font-family: ui-sans-serif, system-ui, sans-serif; font-weight: 800; font-size: 10.5px; line-height: 1; padding: 3px 6px; border-radius: 6px; border: 1.5px solid #ffffff; box-shadow: 0 4px 10px rgba(109, 40, 217, 0.45); white-space: nowrap; z-index: 2;">
               <span>🎯</span>
               <span>Ref-START</span>
+              ${startHasPhotos ? '<span style="font-size: 9px;">📷</span>' : ''}
+              ${startHasNotes && !startHasPhotos ? '<span style="font-size: 9px;">💬</span>' : ''}
             </div>
             <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #6d28d9; margin-top: -1px; z-index: 1;"></div>
           </div>
         `,
-        iconSize: [84, 28],
-        iconAnchor: [42, 28],
+        iconSize: [88, 28],
+        iconAnchor: [44, 28],
         popupAnchor: [0, -28],
       });
+
+      let startPhotoHtml = '';
+      if (startSplit?.photos && startSplit.photos.length > 0) {
+        startPhotoHtml = `
+          <div style="display: flex; gap: 4px; margin-top: 6px; overflow-x: auto; padding-bottom: 2px;">
+            ${startSplit.photos.slice(0, 3).map((p) => `<img src="${p}" style="width: 44px; height: 44px; object-fit: cover; border-radius: 6px; border: 1px solid #cbd5e1;" />`).join('')}
+            ${startSplit.photos.length > 3 ? `<div style="width: 44px; height: 44px; border-radius: 6px; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: #475569;">+${startSplit.photos.length - 3}</div>` : ''}
+          </div>
+        `;
+      }
+
+      let startNotesHtml = '';
+      if (startSplit?.notes) {
+        startNotesHtml = `
+          <div style="color: #475569; font-size: 11px; margin-top: 4px; font-style: italic; background: #f5f3ff; padding: 3px 6px; border-radius: 4px; border-left: 2px solid #6d28d9;">
+            ${startSplit.notes}
+          </div>
+        `;
+      }
+
       const startM = L.marker(refStartPos, { icon: refStartIcon, zIndexOffset: 450 }).bindPopup(`
-        <div style="font-family: sans-serif; font-size: 12px; font-weight: bold; color: #6d28d9; padding: 2px;">
-          🎯 Betöltött Útvonal START (Indulás)
+        <div style="font-family: sans-serif; font-size: 12px; line-height: 1.45; padding: 2px 4px; max-width: 200px;">
+          <div style="font-weight: 800; color: #6d28d9; font-size: 13px; margin-bottom: 3px; display: flex; align-items: center; gap: 4px;">
+            <span>🎯</span>
+            <span>${startSplit?.name || 'Betöltött Útvonal START'}</span>
+          </div>
+          <div style="color: #334155;"><b>Kezdés:</b> ${startSplit?.formattedTime || '00:00'}</div>
+          ${startNotesHtml}
+          ${startPhotoHtml}
         </div>
       `);
 
@@ -295,24 +325,54 @@ export const OsmMap: React.FC<OsmMapProps> = ({
       // 2. Reference Finish Marker
       if (refLatLngs.length > 1) {
         const refEndPos = refLatLngs[refLatLngs.length - 1];
+        const stopHasPhotos = stopSplit?.photos && stopSplit.photos.length > 0;
+        const stopHasNotes = !!stopSplit?.notes;
         const refEndIcon = L.divIcon({
           className: 'custom-ref-end-badge',
           html: `
-            <div style="position: relative; display: flex; flex-direction: column; align-items: center; width: 78px; cursor: pointer; user-select: none;">
+            <div style="position: relative; display: flex; flex-direction: column; align-items: center; width: 84px; cursor: pointer; user-select: none;">
               <div style="display: inline-flex; align-items: center; gap: 3px; background: #be185d; color: #ffffff; font-family: ui-sans-serif, system-ui, sans-serif; font-weight: 800; font-size: 10.5px; line-height: 1; padding: 3px 6px; border-radius: 6px; border: 1.5px solid #ffffff; box-shadow: 0 4px 10px rgba(190, 24, 93, 0.45); white-space: nowrap; z-index: 2;">
                 <span>🏁</span>
                 <span>Ref-CÉL</span>
+                ${stopHasPhotos ? '<span style="font-size: 9px;">📷</span>' : ''}
+                ${stopHasNotes && !stopHasPhotos ? '<span style="font-size: 9px;">💬</span>' : ''}
               </div>
               <div style="width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 6px solid #be185d; margin-top: -1px; z-index: 1;"></div>
             </div>
           `,
-          iconSize: [78, 28],
-          iconAnchor: [39, 28],
+          iconSize: [84, 28],
+          iconAnchor: [42, 28],
           popupAnchor: [0, -28],
         });
+
+        let stopPhotoHtml = '';
+        if (stopSplit?.photos && stopSplit.photos.length > 0) {
+          stopPhotoHtml = `
+            <div style="display: flex; gap: 4px; margin-top: 6px; overflow-x: auto; padding-bottom: 2px;">
+              ${stopSplit.photos.slice(0, 3).map((p) => `<img src="${p}" style="width: 44px; height: 44px; object-fit: cover; border-radius: 6px; border: 1px solid #cbd5e1;" />`).join('')}
+              ${stopSplit.photos.length > 3 ? `<div style="width: 44px; height: 44px; border-radius: 6px; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: #475569;">+${stopSplit.photos.length - 3}</div>` : ''}
+            </div>
+          `;
+        }
+
+        let stopNotesHtml = '';
+        if (stopSplit?.notes) {
+          stopNotesHtml = `
+            <div style="color: #475569; font-size: 11px; margin-top: 4px; font-style: italic; background: #fdf2f8; padding: 3px 6px; border-radius: 4px; border-left: 2px solid #be185d;">
+              ${stopSplit.notes}
+            </div>
+          `;
+        }
+
         const endM = L.marker(refEndPos, { icon: refEndIcon, zIndexOffset: 450 }).bindPopup(`
-          <div style="font-family: sans-serif; font-size: 12px; font-weight: bold; color: #be185d; padding: 2px;">
-            🏁 Betöltött Útvonal CÉL (Végpont)
+          <div style="font-family: sans-serif; font-size: 12px; line-height: 1.45; padding: 2px 4px; max-width: 200px;">
+            <div style="font-weight: 800; color: #be185d; font-size: 13px; margin-bottom: 3px; display: flex; align-items: center; gap: 4px;">
+              <span>🏁</span>
+              <span>${stopSplit?.name || 'Betöltött Útvonal CÉL'}</span>
+            </div>
+            <div style="color: #334155;"><b>Össztáv:</b> ${stopSplit?.formattedDistance || `${(referenceCoordinates.length > 0 ? 0 : 0)} km`}</div>
+            ${stopNotesHtml}
+            ${stopPhotoHtml}
           </div>
         `);
 
@@ -369,29 +429,60 @@ export const OsmMap: React.FC<OsmMapProps> = ({
             sLoc = referenceCoordinates[cIdx];
           }
           if (sLoc) {
+            const hasPhotos = split.photos && split.photos.length > 0;
+            const hasNotes = !!split.notes;
             const badgeLabel = split.name
               ? (split.name.length > 10 ? split.name.slice(0, 9) + '…' : split.name)
               : `🎯 ${split.formattedIndex || split.splitIndex}`;
+            const badgeWidth = split.name ? Math.min(115, 60 + split.name.length * 6) : 74;
+
             const sIcon = L.divIcon({
               className: 'custom-ref-split-badge',
               html: `
-                <div style="position: relative; display: flex; flex-direction: column; align-items: center; width: 70px; cursor: pointer; user-select: none;">
-                  <div style="display: inline-flex; align-items: center; gap: 2px; background: #5b21b6; color: #ffffff; font-family: ui-sans-serif, system-ui, sans-serif; font-weight: 800; font-size: 10px; line-height: 1; padding: 3px 5px; border-radius: 5px; border: 1.5px solid #ffffff; box-shadow: 0 3px 8px rgba(91, 33, 182, 0.4); white-space: nowrap; z-index: 2;">
+                <div style="position: relative; display: flex; flex-direction: column; align-items: center; width: ${badgeWidth}px; cursor: pointer; user-select: none;">
+                  <div style="display: inline-flex; align-items: center; gap: 3px; background: #5b21b6; color: #ffffff; font-family: ui-sans-serif, system-ui, sans-serif; font-weight: 800; font-size: 10px; line-height: 1; padding: 3px 5px; border-radius: 5px; border: 1.5px solid #ffffff; box-shadow: 0 3px 8px rgba(91, 33, 182, 0.4); white-space: nowrap; z-index: 2; max-width: ${badgeWidth}px; overflow: hidden; text-overflow: ellipsis;">
                     <span>🎯</span>
                     <span>${badgeLabel}</span>
+                    ${hasPhotos ? '<span style="font-size: 9px;">📷</span>' : ''}
+                    ${hasNotes && !hasPhotos ? '<span style="font-size: 9px;">💬</span>' : ''}
                   </div>
                   <div style="width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #5b21b6; margin-top: -1px; z-index: 1;"></div>
                 </div>
               `,
-              iconSize: [70, 26],
-              iconAnchor: [35, 26],
+              iconSize: [badgeWidth, 26],
+              iconAnchor: [badgeWidth / 2, 26],
               popupAnchor: [0, -26],
             });
+
+            let refPhotoHtml = '';
+            if (split.photos && split.photos.length > 0) {
+              refPhotoHtml = `
+                <div style="display: flex; gap: 4px; margin-top: 6px; overflow-x: auto; padding-bottom: 2px;">
+                  ${split.photos.slice(0, 3).map((p) => `<img src="${p}" style="width: 44px; height: 44px; object-fit: cover; border-radius: 6px; border: 1px solid #cbd5e1;" />`).join('')}
+                  ${split.photos.length > 3 ? `<div style="width: 44px; height: 44px; border-radius: 6px; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: #475569;">+${split.photos.length - 3}</div>` : ''}
+                </div>
+              `;
+            }
+
+            let refNotesHtml = '';
+            if (split.notes) {
+              refNotesHtml = `
+                <div style="color: #475569; font-size: 11px; margin-top: 4px; font-style: italic; background: #f5f3ff; padding: 3px 6px; border-radius: 4px; border-left: 2px solid #5b21b6;">
+                  ${split.notes}
+                </div>
+              `;
+            }
+
             const sMarker = L.marker([sLoc.lat, sLoc.lng], { icon: sIcon, zIndexOffset: 460 }).bindPopup(`
-              <div style="font-family: sans-serif; font-size: 12px; padding: 2px 4px;">
-                <div style="font-weight: 800; color: #5b21b6;">🎯 ${split.name || `Betöltött Pont #${split.formattedIndex || split.splitIndex}`}</div>
-                <div style="color: #475569; font-size: 11px; margin-top: 2px;">Táv: ${split.formattedDistance || split.distanceKm + ' km'}</div>
-                ${split.notes ? `<div style="color: #64748b; font-size: 11px; margin-top: 2px; font-style: italic;">${split.notes}</div>` : ''}
+              <div style="font-family: sans-serif; font-size: 12px; line-height: 1.45; padding: 2px 4px; max-width: 200px;">
+                <div style="font-weight: 800; color: #5b21b6; font-size: 13px; margin-bottom: 3px; display: flex; align-items: center; gap: 4px;">
+                  <span>🎯</span>
+                  <span>${split.name || `Betöltött Pont #${split.formattedIndex || split.splitIndex}`}</span>
+                </div>
+                <div style="color: #334155;"><b>Táv:</b> ${split.formattedDistance || split.distanceKm + ' km'}</div>
+                ${split.formattedTime ? `<div style="color: #334155;"><b>Idő:</b> ${split.formattedTime}</div>` : ''}
+                ${refNotesHtml}
+                ${refPhotoHtml}
               </div>
             `);
 
