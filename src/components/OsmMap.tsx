@@ -318,18 +318,40 @@ export const OsmMap: React.FC<OsmMapProps> = ({
                 ${split.notes ? `<div style="color: #64748b; font-size: 11px; margin-top: 2px; font-style: italic;">${split.notes}</div>` : ''}
               </div>
             `);
+
+            if (onSelectSplit) {
+              sMarker.on('click', () => {
+                onSelectSplit(split);
+              });
+            }
+
             referenceMarkersGroupRef.current?.addLayer(sMarker);
+            if (split.id) {
+              splitMarkersMapRef.current.set(split.id, sMarker);
+            }
           }
         });
       }
 
-      // If active track is empty and not tracking, fit map bounds to reference track
-      if (coordinates.length === 0 && !isTracking) {
-        const bounds = L.latLngBounds(refLatLngs);
-        mapRef.current.fitBounds(bounds, { padding: [35, 35], maxZoom: 16 });
+      // If not tracking, fit map bounds to reference track or full session track
+      if (!isTracking && mapRef.current) {
+        const allPoints: [number, number][] = [
+          ...refLatLngs,
+          ...coordinates.map((c) => [c.lat, c.lng] as [number, number]),
+        ];
+        if (allPoints.length > 0) {
+          try {
+            const bounds = L.latLngBounds(allPoints);
+            if (bounds.isValid()) {
+              mapRef.current.fitBounds(bounds, { padding: [35, 35], maxZoom: 16 });
+            }
+          } catch {
+            // Ignore fitBounds error
+          }
+        }
       }
     }
-  }, [referenceCoordinates, referenceSplits, coordinates.length, isTracking]);
+  }, [referenceCoordinates, referenceSplits, coordinates, isTracking, onSelectSplit]);
 
   // Update Polyline and Markers
   useEffect(() => {
@@ -666,27 +688,79 @@ export const OsmMap: React.FC<OsmMapProps> = ({
     }
   }, [coordinates, currentLocation, isTracking, splits, onSelectSplit]);
 
-  // Handle zooming to focused split marker
+  // Handle zooming to focused split marker safely
   useEffect(() => {
     if (!mapRef.current || !focusedSplitId) return;
 
-    const marker = splitMarkersMapRef.current.get(focusedSplitId);
-    if (marker) {
-      const latLng = marker.getLatLng();
-      mapRef.current.flyTo(latLng, 17, { animate: true, duration: 0.8 });
-      setTimeout(() => {
-        marker.openPopup();
-      }, 400);
-    } else if (splits && splits.length > 0) {
-      const targetSplit = splits.find((s) => s.id === focusedSplitId);
-      if (targetSplit?.coordinate) {
-        mapRef.current.flyTo([targetSplit.coordinate.lat, targetSplit.coordinate.lng], 17, {
-          animate: true,
-          duration: 0.8,
-        });
+    try {
+      const container = mapContainerRef.current;
+      // Do nothing if container is hidden or not mounted (e.g. display: none in responsive breakpoints)
+      if (!container || container.offsetWidth <= 0 || container.offsetHeight <= 0) {
+        return;
       }
+
+      // Invalidate size to ensure Leaflet has up-to-date container bounds
+      mapRef.current.invalidateSize({ animate: false });
+
+      const mapSize = mapRef.current.getSize();
+      if (!mapSize || mapSize.x <= 0 || mapSize.y <= 0) {
+        return;
+      }
+
+      let targetLatLng: [number, number] | null = null;
+      let targetMarker: L.Marker | null = null;
+
+      const marker = splitMarkersMapRef.current.get(focusedSplitId);
+      if (marker && typeof marker.getLatLng === 'function') {
+        const ll = marker.getLatLng();
+        if (ll && typeof ll.lat === 'number' && typeof ll.lng === 'number' && !isNaN(ll.lat) && !isNaN(ll.lng)) {
+          targetLatLng = [ll.lat, ll.lng];
+          targetMarker = marker;
+        }
+      }
+
+      if (!targetLatLng) {
+        // Fallback: look up coordinate in active splits or reference splits
+        const targetSplit =
+          (splits || []).find((s) => s.id === focusedSplitId) ||
+          (referenceSplits || []).find((s) => s.id === focusedSplitId);
+
+        if (
+          targetSplit?.coordinate &&
+          typeof targetSplit.coordinate.lat === 'number' &&
+          typeof targetSplit.coordinate.lng === 'number' &&
+          !isNaN(targetSplit.coordinate.lat) &&
+          !isNaN(targetSplit.coordinate.lng)
+        ) {
+          targetLatLng = [targetSplit.coordinate.lat, targetSplit.coordinate.lng];
+        }
+      }
+
+      if (targetLatLng && mapRef.current) {
+        try {
+          mapRef.current.flyTo(targetLatLng, 17, { animate: true, duration: 0.6 });
+        } catch {
+          // If flyTo fails for any animation math reason, setView directly
+          mapRef.current.setView(targetLatLng, 17);
+        }
+
+        if (targetMarker) {
+          const m = targetMarker;
+          setTimeout(() => {
+            try {
+              if (m && mapRef.current && mapRef.current.hasLayer(m)) {
+                m.openPopup();
+              }
+            } catch (popupErr) {
+              console.warn('Marker popup open error caught safely:', popupErr);
+            }
+          }, 350);
+        }
+      }
+    } catch (err) {
+      console.warn('Map zoom to split error caught safely:', err);
     }
-  }, [focusedSplitId, splits]);
+  }, [focusedSplitId, splits, referenceSplits]);
 
   const handleRecenterClick = (e: React.MouseEvent) => {
     e.stopPropagation();

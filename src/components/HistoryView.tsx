@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Calendar,
   Clock,
@@ -18,6 +18,7 @@ import {
   Share2,
   Navigation,
   Play,
+  MapPin,
 } from 'lucide-react';
 import { ActivitySession, Split, UserSettings, UserProfile } from '../types';
 import {
@@ -28,6 +29,7 @@ import {
 } from '../utils/geoUtils';
 import { OsmMap } from './OsmMap';
 import { SplitDetailModal } from './SplitDetailModal';
+import { ErrorBoundary } from './ErrorBoundary';
 
 interface HistoryViewProps {
   sessions: ActivitySession[];
@@ -195,16 +197,18 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             {/* Left Column (Metrics + Splits) */}
             <div className="w-full md:w-80 lg:w-96 flex flex-col min-h-0 gap-2.5 flex-shrink-0">
               {/* Mobile-only Map preview */}
-              <div className="block md:hidden w-full h-[150px] rounded-2xl overflow-hidden shadow-sm border border-slate-200 relative flex-shrink-0">
-                <OsmMap
-                  coordinates={selectedSession.coordinates}
-                  currentLocation={null}
-                  splits={selectedSession.splits}
-                  mapLayer={settings.mapLayer}
-                  interactive={true}
-                  focusedSplitId={focusedSplitId}
-                  onSelectSplit={(split) => setFocusedSplitId(split.id)}
-                />
+              <div className="block md:hidden w-full h-[160px] rounded-2xl overflow-hidden shadow-sm border border-slate-200 relative flex-shrink-0">
+                <ErrorBoundary fallbackTitle="Térkép előnézet nem elérhető">
+                  <OsmMap
+                    coordinates={selectedSession.coordinates}
+                    currentLocation={null}
+                    splits={selectedSession.splits}
+                    mapLayer={settings.mapLayer}
+                    interactive={true}
+                    focusedSplitId={focusedSplitId}
+                    onSelectSplit={(split) => setFocusedSplitId(split.id)}
+                  />
+                </ErrorBoundary>
               </div>
 
               {/* Quick Metrics */}
@@ -338,15 +342,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
             {/* Right Column for Desktop / Tablet: Full-height Map */}
             <div className="hidden md:flex flex-1 min-w-[320px] h-full rounded-2xl overflow-hidden shadow-sm border border-slate-200 relative bg-slate-100">
-              <OsmMap
-                coordinates={selectedSession.coordinates}
-                currentLocation={null}
-                splits={selectedSession.splits}
-                mapLayer={settings.mapLayer}
-                interactive={true}
-                focusedSplitId={focusedSplitId}
-                onSelectSplit={(split) => setFocusedSplitId(split.id)}
-              />
+              <ErrorBoundary fallbackTitle="Térkép nem elérhető">
+                <OsmMap
+                  coordinates={selectedSession.coordinates}
+                  currentLocation={null}
+                  splits={selectedSession.splits}
+                  mapLayer={settings.mapLayer}
+                  interactive={true}
+                  focusedSplitId={focusedSplitId}
+                  onSelectSplit={(split) => setFocusedSplitId(split.id)}
+                />
+              </ErrorBoundary>
             </div>
           </div>
         </div>

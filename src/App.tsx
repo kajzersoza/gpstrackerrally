@@ -30,6 +30,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { MenuDrawer } from './components/MenuDrawer';
 import { CoordinateModal } from './components/CoordinateModal';
 import { CloudSyncModal } from './components/CloudSyncModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { loadTrackByCode } from './services/cloudTrackService';
 import { DEFAULT_RALLY_PRESETS } from './constants/rallyPresets';
 
@@ -826,68 +827,70 @@ export default function App() {
       {/* Full-width responsive container */}
       <div className="w-full h-full flex flex-col overflow-hidden relative">
         {/* Active Tab View */}
-        {activeTab === 'activity' && (
-          <ActivityView
-            trackingStatus={trackingStatus}
-            elapsedSeconds={elapsedSeconds}
-            totalDistanceKm={totalDistanceKm}
-            startTime={startTime}
-            currentLocation={currentLocation}
-            coordinates={coordinates}
-            splits={splits}
-            currentSplitTimeSec={currentSplitTimeSec}
-            currentSplitDistanceKm={currentSplitDistanceKm}
-            settings={settings}
-            loadedSession={loadedSession}
-            onUnloadSession={handleUnloadSession}
-            onStart={handleStart}
-            onPause={handlePause}
-            onResume={handleResume}
-            onSplit={handleSplit}
-            onStop={handleStop}
-            onOpenSettings={() => setIsSettingsOpen(true)}
-            onOpenMenu={() => setIsMenuOpen(true)}
-            onOpenCoordinates={() => setIsCoordinateModalOpen(true)}
-            onLayerChange={(layer) => handleUpdateSettings({ mapLayer: layer })}
-            onUpdateSplit={handleUpdateSplit}
-            onUpdateSettings={handleUpdateSettings}
-            onExportGPX={handleExportCurrentGPX}
-          />
-        )}
+        <ErrorBoundary fallbackTitle="Hiba történt az oldal betöltése során">
+          {activeTab === 'activity' && (
+            <ActivityView
+              trackingStatus={trackingStatus}
+              elapsedSeconds={elapsedSeconds}
+              totalDistanceKm={totalDistanceKm}
+              startTime={startTime}
+              currentLocation={currentLocation}
+              coordinates={coordinates}
+              splits={splits}
+              currentSplitTimeSec={currentSplitTimeSec}
+              currentSplitDistanceKm={currentSplitDistanceKm}
+              settings={settings}
+              loadedSession={loadedSession}
+              onUnloadSession={handleUnloadSession}
+              onStart={handleStart}
+              onPause={handlePause}
+              onResume={handleResume}
+              onSplit={handleSplit}
+              onStop={handleStop}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              onOpenMenu={() => setIsMenuOpen(true)}
+              onOpenCoordinates={() => setIsCoordinateModalOpen(true)}
+              onLayerChange={(layer) => handleUpdateSettings({ mapLayer: layer })}
+              onUpdateSplit={handleUpdateSplit}
+              onUpdateSettings={handleUpdateSettings}
+              onExportGPX={handleExportCurrentGPX}
+            />
+          )}
 
-        {activeTab === 'history' && (
-          <HistoryView
-            sessions={savedSessions}
-            settings={settings}
-            userProfile={userProfile}
-            onDeleteSession={handleDeleteSession}
-            onUpdateSession={handleUpdateSession}
-            onBack={() => setActiveTab('activity')}
-            onOpenCloudShare={handleOpenCloudShare}
-            onOpenCloudLoad={handleOpenCloudLoad}
-            onLoadSessionForTracking={handleLoadSessionForTracking}
-          />
-        )}
+          {activeTab === 'history' && (
+            <HistoryView
+              sessions={savedSessions}
+              settings={settings}
+              userProfile={userProfile}
+              onDeleteSession={handleDeleteSession}
+              onUpdateSession={handleUpdateSession}
+              onBack={() => setActiveTab('activity')}
+              onOpenCloudShare={handleOpenCloudShare}
+              onOpenCloudLoad={handleOpenCloudLoad}
+              onLoadSessionForTracking={handleLoadSessionForTracking}
+            />
+          )}
 
-        {activeTab === 'maps' && (
-          <MapsView
-            coordinates={coordinates}
-            currentLocation={currentLocation}
-            settings={settings}
-            onUpdateSettings={handleUpdateSettings}
-          />
-        )}
+          {activeTab === 'maps' && (
+            <MapsView
+              coordinates={coordinates}
+              currentLocation={currentLocation}
+              settings={settings}
+              onUpdateSettings={handleUpdateSettings}
+            />
+          )}
 
-        {activeTab === 'profile' && (
-          <ProfileView
-            sessions={savedSessions}
-            settings={settings}
-            userProfile={userProfile}
-            onUpdateProfile={handleUpdateProfile}
-            onResetData={handleResetData}
-            onOpenCloudSync={handleOpenCloudLoad}
-          />
-        )}
+          {activeTab === 'profile' && (
+            <ProfileView
+              sessions={savedSessions}
+              settings={settings}
+              userProfile={userProfile}
+              onUpdateProfile={handleUpdateProfile}
+              onResetData={handleResetData}
+              onOpenCloudSync={handleOpenCloudLoad}
+            />
+          )}
+        </ErrorBoundary>
 
         {/* Fixed Bottom Navigation */}
         <BottomNav activeTab={activeTab} onSelectTab={setActiveTab} />
