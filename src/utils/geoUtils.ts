@@ -415,6 +415,7 @@ export interface ReferenceTrackMetrics {
     split: Split;
     distanceMeters: number;
     absDistanceMeters: number;
+    directDistanceMeters: number;
     formattedDistance: string;
     formattedRelative: string;
     isReached: boolean;
@@ -717,10 +718,16 @@ export function calculateReferenceMetrics(
     const bearingDeg = splitCoord ? calculateBearing(activePos.lat, activePos.lng, splitCoord.lat, splitCoord.lng) : 0;
     const bearingCompass = getCompassDirection(bearingDeg);
 
+    const directDistKm = splitCoord
+      ? calculateDistance(activePos.lat, activePos.lng, splitCoord.lat, splitCoord.lng)
+      : absDiffKm;
+    const directDistanceMeters = Math.round(directDistKm * 1000);
+
     return {
       split,
       distanceMeters: diffMeters,
       absDistanceMeters: absDiffMeters,
+      directDistanceMeters,
       formattedDistance: `${formattedObj.value} ${formattedObj.unitLabel}`,
       formattedRelative,
       isReached: isPassed || isAtPoint,
@@ -730,11 +737,18 @@ export function calculateReferenceMetrics(
     };
   });
 
-  // Find the active split index (the first upcoming split not yet passed)
-  let activeSplitIndex = splitsProgress.findIndex((sp) => !sp.isPassed);
-  if (activeSplitIndex === -1) {
-    activeSplitIndex = Math.max(0, splitsProgress.length - 1);
-  }
+  // Find the split that the user is currently closest to (amelyik ponthoz a legközelebb vagyunk)
+  let activeSplitIndex = 0;
+  let minSplitDistance = Infinity;
+
+  splitsProgress.forEach((sp, idx) => {
+    // Check both along-track distance and direct distance to find the genuinely nearest point
+    const effectiveDistance = Math.min(sp.absDistanceMeters, sp.directDistanceMeters);
+    if (effectiveDistance < minSplitDistance) {
+      minSplitDistance = effectiveDistance;
+      activeSplitIndex = idx;
+    }
+  });
 
   const activeSp = splitsProgress[activeSplitIndex];
   let nextSplitObj: ReferenceTrackMetrics['nextSplit'] = null;

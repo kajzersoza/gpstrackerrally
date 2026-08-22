@@ -509,10 +509,10 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
           {/* 2. Relatív Távolságok Dashboard (Loaded track relative metrics OR Live Relative Metrics) */}
           {loadedSession && referenceMetrics ? (
             <div className="flex-shrink-0 grid grid-cols-3 gap-2">
-              {/* Card 1: Következő Ponthoz viszonyított távolság (pl. -352m) */}
+              {/* Card 1: Legközelebbi Ponthoz viszonyított távolság (pl. -352m vagy +45m) */}
               <div className="bg-white rounded-2xl p-2.5 lg:p-3 shadow-xs border border-purple-200/70 flex flex-col justify-between">
                 <div className="flex items-center justify-between text-[10.5px] font-bold text-purple-700 uppercase">
-                  <span>Következő Pont</span>
+                  <span>Legközelebbi Pont</span>
                   {referenceMetrics.nextSplit && (
                     <span className="font-mono text-[10px] bg-purple-50 text-purple-700 px-1 rounded">
                       {referenceMetrics.nextSplit.bearingCompass}
@@ -836,7 +836,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                                 <span>{sp.split.name || (isStart ? 'Kezdőpont' : isStop ? 'Cél / Végpont' : `Ellenőrzőpont #${idx}`)}</span>
                                 {isActivePoint && (
                                   <span className="text-[9px] uppercase bg-purple-600 text-white font-extrabold px-1.5 py-0.5 rounded-md shadow-2xs">
-                                    🎯 Aktuális (3. a listában)
+                                    🎯 Legközelebbi (3. a listában)
                                   </span>
                                 )}
                                 {sp.isPassed && !isActivePoint && (
@@ -1291,7 +1291,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                             <span>{sp.split.name || (isStart ? 'Kezdőpont' : isStop ? 'Cél / Végpont' : `Pont #${idx}`)}</span>
                             {isActivePoint && (
                               <span className="text-[8.5px] uppercase bg-purple-600 text-white font-extrabold px-1 py-0.2 rounded">
-                                🎯 Aktuális
+                                🎯 Legközelebbi
                               </span>
                             )}
                           </div>
