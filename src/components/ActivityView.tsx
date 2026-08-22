@@ -514,7 +514,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                 <div className="flex items-center justify-between text-[10.5px] font-bold text-purple-700 uppercase">
                   <span>Legközelebbi Pont</span>
                   {referenceMetrics.nextSplit && (
-                    <span className="font-mono text-[10px] bg-purple-50 text-purple-700 px-1 rounded">
+                    <span className="font-mono text-[11px] bg-purple-50 text-purple-700 font-bold px-1.5 py-0.5 rounded">
                       {referenceMetrics.nextSplit.bearingCompass}
                     </span>
                   )}
@@ -522,10 +522,10 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                 <div className="mt-1">
                   {referenceMetrics.nextSplit ? (
                     <>
-                      <div className="text-base lg:text-lg font-black text-purple-700 font-heading leading-tight truncate">
+                      <div className="text-xl lg:text-2xl font-black text-purple-700 font-heading leading-tight truncate tracking-tight">
                         {referenceMetrics.nextSplit.formattedRelative}
                       </div>
-                      <div className="text-[10px] font-bold text-slate-500 truncate mt-0.5">
+                      <div className="text-[10.5px] font-bold text-slate-500 truncate mt-0.5">
                         {referenceMetrics.nextSplit.name}
                       </div>
                     </>
@@ -544,7 +544,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                   Starttól Táv
                 </span>
                 <div className="mt-1">
-                  <div className="text-base lg:text-lg font-black text-emerald-600 font-heading leading-tight">
+                  <div className="text-xl lg:text-2xl font-black text-emerald-600 font-heading leading-tight tracking-tight">
                     {referenceMetrics.formattedDistanceFromStart}
                   </div>
                   <div className="text-[10px] font-medium text-slate-400 mt-0.5">
@@ -559,7 +559,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                   Célig Hátralévő
                 </span>
                 <div className="mt-1">
-                  <div className="text-base lg:text-lg font-black text-rose-600 font-heading leading-tight">
+                  <div className="text-xl lg:text-2xl font-black text-rose-600 font-heading leading-tight tracking-tight">
                     {referenceMetrics.formattedDistanceToEnd}
                   </div>
                   <div className="text-[10px] font-medium text-slate-400 mt-0.5">
@@ -859,12 +859,12 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
 
                           <div className="flex items-center gap-2 flex-shrink-0">
                             <div className="flex flex-col items-end">
-                              <span className={`text-sm font-black font-heading font-mono ${
+                              <span className={`font-black font-heading font-mono ${
                                 isActivePoint
-                                  ? 'text-purple-700 text-base'
+                                  ? 'text-purple-700 text-lg sm:text-xl'
                                   : sp.isPassed
-                                  ? 'text-emerald-600'
-                                  : 'text-slate-700'
+                                  ? 'text-emerald-600 text-base'
+                                  : 'text-slate-800 text-base'
                               }`}>
                                 {sp.formattedRelative}
                               </span>
@@ -1298,8 +1298,8 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <span className={`text-xs font-bold font-mono ${
-                          isActivePoint ? 'text-purple-700 text-sm' : sp.isPassed ? 'text-emerald-600' : 'text-slate-700'
+                        <span className={`font-black font-mono ${
+                          isActivePoint ? 'text-purple-700 text-base' : sp.isPassed ? 'text-emerald-600 text-sm' : 'text-slate-800 text-sm'
                         }`}>
                           {sp.formattedRelative}
                         </span>
