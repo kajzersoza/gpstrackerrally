@@ -193,17 +193,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             </div>
           </header>
 
-          {/* Responsive Layout: Mobile stacked, Tablet/Desktop side-by-side */}
+          {/* Responsive Layout: Mobile stacked with fixed map on top, Tablet/Desktop side-by-side */}
           <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden p-3 md:p-4 gap-3 md:gap-4">
-            {/* Left Column (Metrics + Splits) */}
-            <div className="w-full md:w-80 lg:w-96 flex flex-col min-h-0 gap-2.5 flex-shrink-0">
-              {/* Mobile-only Map preview */}
-              <div className="block md:hidden w-full h-[160px] rounded-2xl overflow-hidden shadow-sm border border-slate-200 relative flex-shrink-0">
+            {/* Left Column (Fixed Map on Mobile, Metrics, and Scrollable Splits list) */}
+            <div className="w-full md:w-80 lg:w-96 flex-1 md:flex-initial md:h-full flex flex-col min-h-0 gap-2.5 overflow-hidden flex-shrink-0">
+              {/* Mobile-only Fixed Map preview */}
+              <div className="block md:hidden w-full h-[175px] sm:h-[200px] rounded-2xl overflow-hidden shadow-sm border border-slate-200 relative flex-shrink-0 bg-slate-100">
                 <ErrorBoundary fallbackTitle="Térkép előnézet nem elérhető">
                   <OsmMap
                     coordinates={selectedSession.coordinates}
                     currentLocation={null}
-                    splits={selectedSession.splits}
+                    splits={getFullSessionSplits(selectedSession)}
                     mapLayer={settings.mapLayer}
                     interactive={true}
                     focusedSplitId={focusedSplitId}
@@ -247,10 +247,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5 uppercase tracking-wider">
                         <span>Útvonal Pontjai ({fullSplits.length})</span>
                       </h3>
-                      <span className="text-[11px] font-medium text-slate-400">Kattints a fókuszhoz</span>
+                      <span className="text-[11px] font-medium text-slate-400">Görgethető lista</span>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto min-h-0 space-y-2 mt-2 pr-0.5 custom-scrollbar">
+                    <div className="flex-1 overflow-y-auto min-h-0 space-y-2 mt-2 pr-1 custom-scrollbar overscroll-contain">
                       {fullSplits.length === 0 ? (
                         <div className="p-4 text-center text-xs font-bold text-slate-400 bg-slate-50 rounded-xl border border-slate-100">
                           Nincsenek rögzített pontok ebben a trackben.
@@ -268,6 +268,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
                           return (
                             <div
+                              id={`history-split-${split.id}`}
                               key={split.id}
                               onClick={() => setFocusedSplitId(split.id === focusedSplitId ? null : split.id)}
                               className={`p-2.5 rounded-xl border-l-4 transition-all cursor-pointer flex flex-col gap-1.5 ${
