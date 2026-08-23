@@ -996,31 +996,31 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
         {loadedSession && referenceMetrics ? (
           <section className="flex-shrink-0 grid grid-cols-3 gap-1.5">
             {/* Next split card */}
-            <div className="bg-white rounded-xl p-2 shadow-2xs border border-purple-200 flex flex-col justify-between min-h-[58px]">
-              <span className="text-[9.5px] font-bold text-purple-700 uppercase truncate">
+            <div className="bg-white rounded-xl p-2 sm:p-2.5 shadow-2xs border border-purple-200 flex flex-col justify-between min-h-[62px]">
+              <span className="text-[10.5px] sm:text-[11px] font-extrabold text-purple-700 uppercase tracking-wide truncate">
                 Következő
               </span>
-              <div className="text-sm font-black text-purple-700 font-heading leading-tight truncate">
+              <div className="text-[17px] sm:text-lg font-black text-purple-700 font-heading leading-tight truncate tracking-tight">
                 {referenceMetrics.nextSplit ? referenceMetrics.nextSplit.formattedRelative : '✓ Célban'}
               </div>
             </div>
 
             {/* From start */}
-            <div className="bg-white rounded-xl p-2 shadow-2xs border border-slate-100 flex flex-col justify-between min-h-[58px]">
-              <span className="text-[9.5px] font-bold text-slate-400 uppercase truncate">
+            <div className="bg-white rounded-xl p-2 sm:p-2.5 shadow-2xs border border-slate-100 flex flex-col justify-between min-h-[62px]">
+              <span className="text-[10.5px] sm:text-[11px] font-extrabold text-slate-500 uppercase tracking-wide truncate">
                 Starttól
               </span>
-              <div className="text-sm font-black text-emerald-600 font-heading leading-tight truncate">
+              <div className="text-[17px] sm:text-lg font-black text-emerald-600 font-heading leading-tight truncate tracking-tight">
                 {referenceMetrics.formattedDistanceFromStart}
               </div>
             </div>
 
             {/* To end */}
-            <div className="bg-white rounded-xl p-2 shadow-2xs border border-slate-100 flex flex-col justify-between min-h-[58px]">
-              <span className="text-[9.5px] font-bold text-slate-400 uppercase truncate">
+            <div className="bg-white rounded-xl p-2 sm:p-2.5 shadow-2xs border border-slate-100 flex flex-col justify-between min-h-[62px]">
+              <span className="text-[10.5px] sm:text-[11px] font-extrabold text-slate-500 uppercase tracking-wide truncate">
                 Célig
               </span>
-              <div className="text-sm font-black text-rose-600 font-heading leading-tight truncate">
+              <div className="text-[17px] sm:text-lg font-black text-rose-600 font-heading leading-tight truncate tracking-tight">
                 {referenceMetrics.formattedDistanceToEnd}
               </div>
             </div>
@@ -1153,20 +1153,20 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className={`text-lg font-black tracking-tight w-6 text-center select-none font-heading flex-shrink-0 ${isFocused ? 'text-[#0050cb]' : 'text-[#0060e6]'}`}>
+                        <span className={`text-xl font-black tracking-tight w-7 text-center select-none font-heading flex-shrink-0 ${isFocused ? 'text-[#0050cb]' : 'text-[#0060e6]'}`}>
                           {split.formattedIndex}
                         </span>
                         <div className="min-w-0">
                           {split.name && (
-                            <div className="text-xs font-black text-[#0050cb] truncate font-heading">
+                            <div className="text-sm font-black text-[#0050cb] truncate font-heading">
                               {split.name}
                             </div>
                           )}
                           <div className="flex items-baseline gap-1.5 flex-wrap">
-                            <span className="text-sm font-black text-slate-900 font-heading leading-tight">
+                            <span className="text-base font-black text-slate-900 font-heading leading-tight">
                               {formattedSplitDist.value} {formattedSplitDist.unitLabel}
                             </span>
-                            <span className="text-[10px] font-bold text-slate-500 font-heading">
+                            <span className="text-[11px] font-bold text-slate-500 font-heading">
                               (Össz: {formattedTotalDist.value})
                             </span>
                           </div>
@@ -1174,7 +1174,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                       </div>
 
                       <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <span className="text-xs font-black text-[#0060e6] font-mono select-none">
+                        <span className="text-sm font-black text-[#0060e6] font-mono select-none">
                           {split.formattedTime}
                         </span>
                         <button
@@ -1183,9 +1183,9 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                             e.stopPropagation();
                             setEditingSplit(split);
                           }}
-                          className="p-1 bg-white/80 hover:bg-white text-[#0050cb] rounded-lg shadow-2xs border border-blue-200/50"
+                          className="p-1.5 bg-white/80 hover:bg-white text-[#0050cb] rounded-lg shadow-2xs border border-blue-200/50"
                         >
-                          <Edit3 className="w-3 h-3" />
+                          <Edit3 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>
@@ -1239,9 +1239,9 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 min-w-0">
+                      <div className="flex items-center gap-2.5 min-w-0">
                         <span
-                          className={`text-xs font-black px-1.5 py-0.5 rounded-md flex-shrink-0 ${
+                          className={`text-sm font-black px-2 py-0.5 rounded-lg flex-shrink-0 font-heading ${
                             isStart
                               ? 'bg-emerald-600 text-white'
                               : isStop
@@ -1256,10 +1256,10 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                           {isStart ? 'START' : isStop ? 'CÉL' : sp.isPassed ? '✓' : `#${sp.split.formattedIndex || idx}`}
                         </span>
                         <div className="min-w-0">
-                          <div className="text-xs font-bold text-slate-800 truncate flex items-center gap-1">
+                          <div className="text-sm font-bold text-slate-800 truncate flex items-center gap-1.5">
                             <span>{sp.split.name || (isStart ? 'Kezdőpont' : isStop ? 'Cél / Végpont' : `Pont #${idx}`)}</span>
                             {isActivePoint && (
-                              <span className="text-[8.5px] uppercase bg-purple-600 text-white font-extrabold px-1 py-0.2 rounded">
+                              <span className="text-[9px] uppercase bg-purple-600 text-white font-extrabold px-1.5 py-0.5 rounded">
                                 🎯 Legközelebbi
                               </span>
                             )}
@@ -1268,7 +1268,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                       </div>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
                         <span className={`font-black font-mono tracking-tight ${
-                          isActivePoint ? 'text-purple-700 text-lg' : sp.isPassed ? 'text-emerald-600 text-base' : 'text-slate-800 text-base'
+                          isActivePoint ? 'text-purple-700 text-xl' : sp.isPassed ? 'text-emerald-600 text-lg' : 'text-slate-800 text-lg'
                         }`}>
                           {sp.formattedRelative}
                         </span>
@@ -1278,10 +1278,10 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                             e.stopPropagation();
                             setEditingSplit(sp.split);
                           }}
-                          className="p-1 bg-white/90 hover:bg-white text-purple-700 rounded-lg shadow-2xs border border-purple-200"
+                          className="p-1.5 bg-white/90 hover:bg-white text-purple-700 rounded-lg shadow-2xs border border-purple-200"
                           title="Részletek, fotók, megjegyzések"
                         >
-                          <Edit3 className="w-3 h-3" />
+                          <Edit3 className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>

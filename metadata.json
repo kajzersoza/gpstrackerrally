@@ -1,5 +1,5 @@
 {
-  "name": "Remix GPS TRACKER",
+  "name": "Remix Remix GPS TRACKER",
   "description": "PWA GPS Tracker with OpenStreetMap, live distance tracking, split intervals, coordinates, and activity history.",
   "requestFramePermissions": [
     "geolocation"

@@ -42,6 +42,7 @@ interface HistoryViewProps {
   onOpenCloudShare?: (session: ActivitySession) => void;
   onOpenCloudLoad?: () => void;
   onLoadSessionForTracking?: (session: ActivitySession) => void;
+  onOpenRoutePlanner?: () => void;
 }
 
 export const HistoryView: React.FC<HistoryViewProps> = ({
@@ -54,6 +55,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onOpenCloudShare,
   onOpenCloudLoad,
   onLoadSessionForTracking,
+  onOpenRoutePlanner,
 }) => {
   const [selectedSession, setSelectedSession] = useState<ActivitySession | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<ActivitySession | null>(null);
@@ -412,9 +414,21 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               </button>
               <h1 className="text-lg font-black text-slate-800">Előzmények</h1>
             </div>
-            <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
-              {sessions.length} mentve
-            </span>
+            <div className="flex items-center gap-2">
+              {onOpenRoutePlanner && (
+                <button
+                  type="button"
+                  onClick={onOpenRoutePlanner}
+                  className="bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95"
+                >
+                  <Route className="w-3.5 h-3.5" />
+                  <span>Új Tervezés</span>
+                </button>
+              )}
+              <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
+                {sessions.length} mentve
+              </span>
+            </div>
           </header>
 
           {/* List with max-w-4xl container */}
@@ -454,11 +468,21 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 <p className="text-xs text-slate-400 mt-1 max-w-xs">
                   Indíts egy nyomkövetést a Főoldalon, vagy tölts be egy tracket felhő kóddal!
                 </p>
-                <div className="flex gap-2 mt-4">
+                <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
+                  {onOpenRoutePlanner && (
+                    <button
+                      type="button"
+                      onClick={onOpenRoutePlanner}
+                      className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Route className="w-3.5 h-3.5" />
+                      <span>Útvonal Tervezése (Tervező)</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={onBack}
-                    className="bg-[#0060e6] text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm active:scale-95 transition-all"
+                    className="bg-[#0060e6] hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm active:scale-95 transition-all cursor-pointer"
                   >
                     Ugrás az Activity nézethez
                   </button>
@@ -466,7 +490,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     <button
                       type="button"
                       onClick={onOpenCloudLoad}
-                      className="bg-white border border-slate-200 text-[#0050cb] px-4 py-2 rounded-xl text-xs font-bold shadow-2xs active:scale-95 transition-all flex items-center gap-1"
+                      className="bg-white border border-slate-200 text-[#0050cb] hover:bg-slate-50 px-4 py-2 rounded-xl text-xs font-bold shadow-2xs active:scale-95 transition-all flex items-center gap-1 cursor-pointer"
                     >
                       <CloudDownload className="w-3.5 h-3.5" />
                       <span>Kód beírása</span>

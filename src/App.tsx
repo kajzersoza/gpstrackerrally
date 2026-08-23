@@ -30,6 +30,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { MenuDrawer } from './components/MenuDrawer';
 import { CoordinateModal } from './components/CoordinateModal';
 import { CloudSyncModal } from './components/CloudSyncModal';
+import { RoutePlannerModal } from './components/RoutePlannerModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { loadTrackByCode } from './services/cloudTrackService';
 import { DEFAULT_RALLY_PRESETS } from './constants/rallyPresets';
@@ -67,6 +68,7 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const [isCoordinateModalOpen, setIsCoordinateModalOpen] = useState<boolean>(false);
+  const [isRoutePlannerOpen, setIsRoutePlannerOpen] = useState<boolean>(false);
 
   // Settings
   const [settings, setSettings] = useState<UserSettings>(() => {
@@ -122,6 +124,25 @@ export default function App() {
 
   const handleUnloadSession = () => {
     setLoadedSession(null);
+  };
+
+  const handleSavePlannedSession = (session: ActivitySession, loadForTracking: boolean = false) => {
+    setSavedSessions((prev) => {
+      const updatedList = [session, ...prev];
+      try {
+        localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(updatedList));
+      } catch {
+        // ignore
+      }
+      return updatedList;
+    });
+
+    if (loadForTracking) {
+      setLoadedSession(session);
+      setActiveTab('activity');
+    } else {
+      setActiveTab('history');
+    }
   };
 
   const handleUpdateProfile = (newProfile: Partial<UserProfile>) => {
@@ -888,6 +909,7 @@ export default function App() {
               onOpenCloudShare={handleOpenCloudShare}
               onOpenCloudLoad={handleOpenCloudLoad}
               onLoadSessionForTracking={handleLoadSessionForTracking}
+              onOpenRoutePlanner={() => setIsRoutePlannerOpen(true)}
             />
           )}
 
@@ -928,6 +950,7 @@ export default function App() {
           onClose={() => setIsSettingsOpen(false)}
           onUpdateSettings={handleUpdateSettings}
           onResetDefaults={handleResetData}
+          onOpenRoutePlanner={() => setIsRoutePlannerOpen(true)}
         />
 
         <MenuDrawer
@@ -939,7 +962,17 @@ export default function App() {
           onExportCurrentGPX={handleExportCurrentGPX}
           onResetData={handleResetData}
           onOpenCloudSync={handleOpenCloudLoad}
+          onOpenRoutePlanner={() => setIsRoutePlannerOpen(true)}
           hasTrackData={coordinates.length > 0}
+        />
+
+        {/* Route Planner / Tervező Modal */}
+        <RoutePlannerModal
+          isOpen={isRoutePlannerOpen}
+          onClose={() => setIsRoutePlannerOpen(false)}
+          settings={settings}
+          currentGpsLocation={currentLocation}
+          onSavePlannedSession={handleSavePlannedSession}
         />
 
         {/* Cloud Sync & Share Modal */}

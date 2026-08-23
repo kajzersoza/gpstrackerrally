@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Navigation, History, Settings, Play, Sparkles, Download, Info, CheckCircle2, RotateCcw } from 'lucide-react';
+import { X, Navigation, History, Settings, Play, Sparkles, Download, Info, CheckCircle2, RotateCcw, Map, Compass } from 'lucide-react';
 import { ActiveTab, UserSettings } from '../types';
 
 interface MenuDrawerProps {
@@ -11,6 +11,7 @@ interface MenuDrawerProps {
   onExportCurrentGPX: () => void;
   onResetData?: () => void;
   onOpenCloudSync?: () => void;
+  onOpenRoutePlanner?: () => void;
   hasTrackData: boolean;
 }
 
@@ -23,6 +24,7 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
   onExportCurrentGPX,
   onResetData,
   onOpenCloudSync,
+  onOpenRoutePlanner,
   hasTrackData,
 }) => {
   if (!isOpen) return null;
@@ -95,6 +97,22 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({
           <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 py-1">
             Gyorsműveletek
           </div>
+
+          {onOpenRoutePlanner && (
+            <button
+              onClick={() => {
+                onOpenRoutePlanner();
+                onClose();
+              }}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-purple-700 bg-purple-50/60 hover:bg-purple-100 font-bold transition-colors text-left border border-purple-200/50"
+            >
+              <Compass className="w-4 h-4 text-purple-700" />
+              <div className="flex items-center gap-1.5">
+                <span>Útvonaltervező</span>
+                <span className="text-[9px] bg-purple-600 text-white font-extrabold px-1 rounded">ÚJ</span>
+              </div>
+            </button>
+          )}
 
           {onOpenCloudSync && (
             <button

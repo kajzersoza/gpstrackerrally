@@ -14,6 +14,9 @@ import {
   Plus,
   Trash2,
   Check,
+  Compass,
+  Map,
+  Sparkles,
 } from 'lucide-react';
 import { UserSettings, ActivityMode } from '../types';
 import { DEFAULT_RALLY_PRESETS, getPresetIcon } from '../constants/rallyPresets';
@@ -24,6 +27,7 @@ interface SettingsModalProps {
   onClose: () => void;
   onUpdateSettings: (newSettings: Partial<UserSettings>) => void;
   onResetDefaults?: () => void;
+  onOpenRoutePlanner?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -32,6 +36,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   onUpdateSettings,
   onResetDefaults,
+  onOpenRoutePlanner,
 }) => {
   const [newPresetText, setNewPresetText] = useState('');
 
@@ -86,6 +91,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Body */}
         <div className="p-5 space-y-4 overflow-y-auto custom-scrollbar flex-1 text-sm">
+          {/* 🌟 Útvonaltervező (Tervező) Prominent Feature */}
+          {onOpenRoutePlanner && (
+            <div className="p-3.5 bg-gradient-to-br from-blue-50 via-indigo-50/40 to-purple-50/50 rounded-2xl border-2 border-[#0050cb]/20 shadow-2xs space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-[#0050cb] text-white rounded-xl shadow-xs">
+                    <Map className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                      <span>Útvonaltervező</span>
+                      <span className="text-[9px] bg-purple-600 text-white font-extrabold px-1.5 py-0.2 rounded-full uppercase tracking-normal">Új</span>
+                    </h3>
+                    <p className="text-[11px] text-slate-600 font-medium">
+                      Térképes útvonal és ellenőrzőpontok manuális megrajzolása
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-[10px] text-slate-500 leading-relaxed">
+                Tervezz útvonalat kattintással a térképen, adj hozzá számozott résztávokat/rally pontokat, mintha valós időben logoltál volna.
+              </p>
+
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenRoutePlanner();
+                }}
+                className="w-full py-2 px-3 bg-[#0050cb] hover:bg-blue-700 active:scale-98 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+              >
+                <Compass className="w-4 h-4" />
+                <span>Útvonaltervező Megnyitása</span>
+              </button>
+            </div>
+          )}
+
           {/* 1. Activity / Tracking Mode (Gyalog, Kerékpár, Autó) */}
           <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">
