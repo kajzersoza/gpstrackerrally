@@ -101,10 +101,12 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
   const [editingSplit, setEditingSplit] = useState<Split | null>(null);
   const [splitsTab, setSplitsTab] = useState<'active' | 'loaded'>('active');
 
-  // If a reference session is loaded, default to 'loaded' tab to inspect track points immediately
+  // If a reference session is loaded or unloaded, switch default tab appropriately
   useEffect(() => {
     if (loadedSession) {
       setSplitsTab('loaded');
+    } else {
+      setSplitsTab('active');
     }
   }, [loadedSession?.id]);
 
@@ -291,18 +293,19 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
       {/* DESKTOP & TABLET VIEW (md: and above)                                    */}
       {/* Required Layout: [BAL: Gombok] -> [KÖZÉP: Adatok] -> [JOBB: Térkép]       */}
       {/* ========================================================================= */}
-      <main className="hidden md:flex flex-1 min-h-0 p-3 lg:p-4 gap-3 lg:gap-4 overflow-hidden">
+      <main className="hidden md:flex flex-1 min-h-0 p-2.5 lg:p-3.5 gap-2.5 lg:gap-3.5 overflow-hidden">
         {/* ------------------------------------------------------------- */}
         {/* BAL OLDALT (LEFT): Gombok, Vezérlés & Műveletek               */}
         {/* ------------------------------------------------------------- */}
-        <section className="w-60 lg:w-72 xl:w-80 shrink-0 flex flex-col justify-between gap-3 bg-white/90 rounded-2xl border border-slate-200/80 shadow-xs p-3.5 overflow-y-auto custom-scrollbar">
-          <div className="flex flex-col gap-3">
+        <section className="w-44 md:w-48 lg:w-52 shrink-0 flex flex-col justify-between gap-2 bg-white/95 rounded-2xl border border-slate-200/80 shadow-xs p-2.5 overflow-hidden">
+          <div className="flex flex-col gap-2">
+            {/* Clock & Status Header */}
             <div className="pb-1 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="text-xs font-black text-slate-400 uppercase tracking-wider font-heading">
-                Vezérlés & Műveletek
-              </h2>
               <span className="text-[11px] font-mono font-bold text-[#0060e6]">
                 {displayClock}
+              </span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                {trackingStatus === 'running' ? '● Aktív' : trackingStatus === 'paused' ? '❚❚ Szünet' : 'Kész'}
               </span>
             </div>
 
@@ -311,10 +314,10 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
               <button
                 id="btn-desktop-start"
                 onClick={onStart}
-                className="w-full h-14 bg-[#0066ff] hover:bg-[#0054d6] active:bg-[#0048b8] text-white font-black text-lg rounded-2xl shadow-[0_6px_16px_rgba(0,102,255,0.3)] active:scale-98 transition-all flex items-center justify-center gap-2.5 cursor-pointer font-heading"
+                className="w-full h-11 bg-[#0066ff] hover:bg-[#0054d6] active:bg-[#0048b8] text-white font-black text-sm md:text-base rounded-xl shadow-[0_4px_12px_rgba(0,102,255,0.25)] active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer font-heading"
               >
-                <Play className="w-6 h-6 fill-current" />
-                <span>{loadedSession ? 'Rögzítés Indítása' : 'Start Nyomkövetés'}</span>
+                <Play className="w-5 h-5 fill-current" />
+                <span>{loadedSession ? 'Indítás' : 'Start'}</span>
               </button>
             )}
 
@@ -322,10 +325,10 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
               <button
                 id="btn-desktop-pause"
                 onClick={onPause}
-                className="w-full h-14 bg-[#e67e00] hover:bg-[#c96e00] active:bg-[#a85c00] text-white font-black text-lg rounded-2xl shadow-[0_6px_16px_rgba(230,126,0,0.3)] active:scale-98 transition-all flex items-center justify-center gap-2.5 cursor-pointer font-heading"
+                className="w-full h-11 bg-[#e67e00] hover:bg-[#c96e00] active:bg-[#a85c00] text-white font-black text-sm md:text-base rounded-xl shadow-[0_4px_12px_rgba(230,126,0,0.25)] active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer font-heading"
               >
-                <Pause className="w-6 h-6 fill-current" />
-                <span>Szünet (Pause)</span>
+                <Pause className="w-5 h-5 fill-current" />
+                <span>Szünet</span>
               </button>
             )}
 
@@ -333,10 +336,10 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
               <button
                 id="btn-desktop-resume"
                 onClick={onResume}
-                className="w-full h-14 bg-[#0066ff] hover:bg-[#0054d6] active:bg-[#0048b8] text-white font-black text-lg rounded-2xl shadow-[0_6px_16px_rgba(0,102,255,0.3)] active:scale-98 transition-all flex items-center justify-center gap-2.5 cursor-pointer font-heading"
+                className="w-full h-11 bg-[#0066ff] hover:bg-[#0054d6] active:bg-[#0048b8] text-white font-black text-sm md:text-base rounded-xl shadow-[0_4px_12px_rgba(0,102,255,0.25)] active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer font-heading"
               >
-                <Play className="w-6 h-6 fill-current" />
-                <span>Folytatás (Resume)</span>
+                <Play className="w-5 h-5 fill-current" />
+                <span>Folytatás</span>
               </button>
             )}
 
@@ -345,14 +348,14 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
               id="btn-desktop-split"
               onClick={onSplit}
               disabled={trackingStatus === 'idle'}
-              className={`w-full h-13 font-black text-base rounded-2xl transition-all flex items-center justify-center gap-2 font-heading ${
+              className={`w-full h-10 font-black text-xs md:text-sm rounded-xl transition-all flex items-center justify-center gap-1.5 font-heading ${
                 trackingStatus === 'idle'
                   ? 'bg-slate-100 border border-slate-200 text-slate-400 opacity-50 cursor-not-allowed shadow-none'
-                  : 'bg-white border-2 border-[#0066ff] text-[#0066ff] hover:bg-blue-50 active:bg-blue-100 shadow-sm active:scale-98 cursor-pointer'
+                  : 'bg-white border-2 border-[#0066ff] text-[#0066ff] hover:bg-blue-50 active:bg-blue-100 shadow-2xs active:scale-98 cursor-pointer'
               }`}
             >
-              <Flag className="w-5 h-5 text-[#0066ff]" />
-              <span>Résztáv rögzítése ({splits.length})</span>
+              <Flag className="w-4 h-4 text-[#0066ff]" />
+              <span>Résztáv ({splits.length})</span>
             </button>
 
             {/* 3. Stop Button */}
@@ -360,22 +363,19 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
               id="btn-desktop-stop"
               onClick={onStop}
               disabled={trackingStatus === 'idle'}
-              className={`w-full h-12 font-black text-base rounded-2xl transition-all flex items-center justify-center gap-2 font-heading ${
+              className={`w-full h-9 font-black text-xs md:text-sm rounded-xl transition-all flex items-center justify-center gap-1.5 font-heading ${
                 trackingStatus === 'idle'
                   ? 'bg-red-50 border border-red-100 text-red-300 opacity-40 cursor-not-allowed shadow-none'
-                  : 'bg-[#ba1a1a] hover:bg-[#a01616] active:bg-[#851212] text-white shadow-[0_4px_12px_rgba(186,26,26,0.25)] active:scale-98 cursor-pointer'
+                  : 'bg-[#ba1a1a] hover:bg-[#a01616] active:bg-[#851212] text-white shadow-[0_3px_10px_rgba(186,26,26,0.2)] active:scale-98 cursor-pointer'
               }`}
             >
-              <Square className="w-4 h-4 fill-current" />
-              <span>Leállítás & Mentés (Stop)</span>
+              <Square className="w-3.5 h-3.5 fill-current" />
+              <span>Stop</span>
             </button>
 
             {/* Activity Mode Switcher */}
-            <div className="pt-2">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
-                Tevékenység Típusa
-              </label>
-              <div className="grid grid-cols-3 gap-1.5">
+            <div className="pt-1">
+              <div className="grid grid-cols-3 gap-1">
                 {(['car', 'cycling', 'walking'] as ActivityMode[]).map((mode) => {
                   const isActive = settings.activityMode === mode;
                   return (
@@ -383,14 +383,14 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                       key={mode}
                       type="button"
                       onClick={() => onUpdateSettings && onUpdateSettings({ activityMode: mode })}
-                      className={`flex flex-col items-center justify-center py-2 px-1 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                      className={`flex flex-col items-center justify-center py-1.5 px-0.5 rounded-lg border text-[10px] font-bold transition-all cursor-pointer ${
                         isActive
                           ? 'bg-[#eaf2ff] text-[#0050cb] border-blue-300 shadow-2xs'
                           : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                       }`}
                     >
                       {getActivityIcon(mode)}
-                      <span className="text-[10px] mt-1">{getActivityLabel(mode)}</span>
+                      <span className="text-[9px] mt-0.5">{getActivityLabel(mode)}</span>
                     </button>
                   );
                 })}
@@ -399,20 +399,20 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
           </div>
 
           {/* Bottom Info Status in Left Column */}
-          <div className="pt-2 border-t border-slate-100 flex flex-col gap-2 text-xs">
-            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/70 space-y-1.5">
-              <div className="flex items-center justify-between text-slate-500 font-medium text-[11px]">
-                <span>GPS Állapot:</span>
+          <div className="pt-1.5 border-t border-slate-100 flex flex-col gap-1.5 text-xs">
+            <div className="bg-slate-50 p-2 rounded-xl border border-slate-200/70 space-y-1">
+              <div className="flex items-center justify-between text-slate-500 font-medium text-[10.5px]">
+                <span>GPS:</span>
                 <span className="font-bold text-slate-800">
-                  {settings.simulationMode ? 'Szimuláció' : 'Valós GPS'}
+                  {settings.simulationMode ? 'Szimuláció' : 'Valós'}
                 </span>
               </div>
-              <div className="flex items-center justify-between text-slate-500 font-medium text-[11px]">
-                <span>Átlagsebesség:</span>
+              <div className="flex items-center justify-between text-slate-500 font-medium text-[10.5px]">
+                <span>Átlag:</span>
                 <span className="font-bold text-slate-800">{avgSpeed} km/h</span>
               </div>
-              <div className="flex items-center justify-between text-slate-500 font-medium text-[11px]">
-                <span>Pontok száma:</span>
+              <div className="flex items-center justify-between text-slate-500 font-medium text-[10.5px]">
+                <span>Pontok:</span>
                 <span className="font-bold text-[#0050cb]">{coordinates.length} db</span>
               </div>
             </div>
@@ -420,10 +420,10 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
             <button
               onClick={onOpenCoordinates}
               type="button"
-              className="w-full py-2 px-3 bg-white hover:bg-blue-50 border border-slate-200 text-[#0050cb] rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+              className="w-full py-1.5 px-2 bg-white hover:bg-blue-50 border border-slate-200 text-[#0050cb] rounded-lg font-bold text-[11px] flex items-center justify-center gap-1 transition-colors cursor-pointer"
             >
-              <MapPin className="w-3.5 h-3.5" />
-              <span>Koordináta részletek</span>
+              <MapPin className="w-3 h-3" />
+              <span>Koordináták</span>
             </button>
           </div>
         </section>
@@ -431,34 +431,24 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
         {/* ------------------------------------------------------------- */}
         {/* KÖZÉPEN (MIDDLE): Adatok, Relatív Távolságok & Résztávok       */}
         {/* ------------------------------------------------------------- */}
-        <section className="flex-1 min-w-[300px] max-w-xl xl:max-w-2xl flex flex-col min-h-0 gap-2.5 overflow-hidden">
+        <section className="flex-1 min-w-[280px] max-w-xl xl:max-w-2xl flex flex-col min-h-0 gap-2 overflow-hidden">
           {/* Loaded Track Banner (if a track is loaded) */}
           {loadedSession && (
-            <div className="flex-shrink-0 bg-gradient-to-r from-purple-50 to-indigo-50 border border-purple-200/90 rounded-2xl p-2.5 px-3.5 shadow-xs flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-                  <Target className="w-4 h-4" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] uppercase tracking-wider font-extrabold text-purple-700 bg-purple-100/90 px-1.5 py-0.5 rounded">
-                      Betöltött Track
+            <div className="flex-shrink-0 bg-purple-50/90 border border-purple-200 rounded-xl px-2.5 py-1.5 shadow-2xs flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <Target className="w-4 h-4 text-purple-600 shrink-0" />
+                <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-bold text-slate-800 truncate">
+                    {loadedSession.title}
+                  </span>
+                  <span className="text-[11px] text-purple-900/80 font-medium">
+                    {formatDistanceByUnit(loadedSession.totalDistanceKm, settings.unit).value} {formatDistanceByUnit(loadedSession.totalDistanceKm, settings.unit).unitLabel} • {loadedSession.splits?.length || 0} pont
+                  </span>
+                  {referenceMetrics && (
+                    <span className="text-[11px] font-bold text-purple-700">
+                      • {referenceMetrics.progressPercent}%
                     </span>
-                    <span className="text-xs font-bold text-slate-800 truncate">
-                      {loadedSession.title}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-purple-900/80 font-medium flex items-center gap-2 mt-0.5">
-                    <span>{formatDistanceByUnit(loadedSession.totalDistanceKm, settings.unit).value} {formatDistanceByUnit(loadedSession.totalDistanceKm, settings.unit).unitLabel}</span>
-                    <span>•</span>
-                    <span>{loadedSession.splits?.length || 0} ellenőrzőpont</span>
-                    {referenceMetrics && (
-                      <>
-                        <span>•</span>
-                        <span className="font-bold text-purple-700">{referenceMetrics.progressPercent}% kész</span>
-                      </>
-                    )}
-                  </div>
+                  )}
                 </div>
               </div>
 
@@ -466,118 +456,109 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                 <button
                   type="button"
                   onClick={onUnloadSession}
-                  className="p-1.5 text-purple-400 hover:text-purple-700 hover:bg-purple-100 rounded-xl transition-all cursor-pointer"
+                  className="p-1 text-purple-400 hover:text-purple-700 hover:bg-purple-100 rounded-lg transition-all cursor-pointer"
                   title="Betöltött útvonal bezárása"
                 >
-                  <X className="w-4 h-4" />
+                  <X className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
           )}
 
-          {/* 1. Összes Távolság Banner */}
-          <div className="flex-shrink-0 bg-[#eaf2ff] rounded-2xl px-4 py-3 lg:py-3.5 shadow-[0_2px_10px_rgba(0,102,255,0.06)] border border-blue-100/70 flex items-baseline relative">
-            <div className="flex flex-col">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700/80 mb-0.5">
-                Összes Megtett Távolság
+          {/* 1. Megtett Távolság Display (Compact, cím nélkül) */}
+          <div className="flex-shrink-0 bg-[#eaf2ff] rounded-xl px-3 py-1.5 shadow-2xs border border-blue-100/80 flex items-center justify-between relative">
+            <div className="flex items-baseline">
+              <span className="text-2xl md:text-3xl font-black tracking-tight text-[#0060e6] leading-none font-heading">
+                {formattedDistanceObj.value}
               </span>
-              <div className="flex items-baseline">
-                <span className="text-3xl lg:text-4xl font-black tracking-tight text-[#0060e6] leading-none font-heading">
-                  {formattedDistanceObj.value}
-                </span>
-                <span className="text-xl font-bold text-[#0060e6] ml-2 select-none font-heading">
-                  {formattedDistanceObj.unitLabel}
-                </span>
-              </div>
+              <span className="text-base md:text-lg font-bold text-[#0060e6] ml-1.5 select-none font-heading">
+                {formattedDistanceObj.unitLabel}
+              </span>
             </div>
 
-            <div className="ml-auto flex items-center gap-2">
-              <div className="flex items-center gap-1.5 bg-white/80 px-2.5 py-1 rounded-full border border-blue-200/60 shadow-2xs">
+            <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1 bg-white/80 px-2 py-0.5 rounded-full border border-blue-200/60 shadow-2xs">
                 {getActivityIcon(settings.activityMode)}
-                <span className="text-xs font-bold text-slate-700">{getActivityLabel(settings.activityMode)}</span>
+                <span className="text-[11px] font-bold text-slate-700">{getActivityLabel(settings.activityMode)}</span>
               </div>
 
               {trackingStatus === 'running' && (
-                <div className="flex items-center gap-1.5 bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span className="text-[11px] font-bold uppercase tracking-wider">Élő</span>
+                <div className="flex items-center gap-1 bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Élő</span>
+                </div>
+              )}
+              {trackingStatus === 'paused' && (
+                <div className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Szünet</span>
                 </div>
               )}
             </div>
           </div>
 
-          {/* 2. Relatív Távolságok Dashboard (Loaded track relative metrics OR Live Relative Metrics) */}
+          {/* 2. Relatív Távolságok / Live Információk (Kompakt kártyák fölösleges címek nélkül) */}
           {loadedSession && referenceMetrics ? (
-            <div className="flex-shrink-0 grid grid-cols-3 gap-2">
-              {/* Card 1: Legközelebbi Ponthoz viszonyított távolság (pl. -352m vagy +45m) */}
-              <div className="bg-white rounded-2xl p-2.5 lg:p-3 shadow-xs border border-purple-200/70 flex flex-col justify-between">
-                <div className="flex items-center justify-between text-[10.5px] font-bold text-purple-700 uppercase">
-                  <span>Legközelebbi Pont</span>
+            <div className="flex-shrink-0 grid grid-cols-3 gap-1.5">
+              {/* Card 1: Legközelebbi Ponthoz viszonyított távolság */}
+              <div className="bg-white rounded-xl p-2 shadow-2xs border border-purple-200/80 flex flex-col justify-between">
+                <div className="flex items-center justify-between text-[10px] font-bold text-purple-700 uppercase">
+                  <span>Legközelebbi</span>
                   {referenceMetrics.nextSplit && (
-                    <span className="font-mono text-[11px] bg-purple-50 text-purple-700 font-bold px-1.5 py-0.5 rounded">
+                    <span className="font-mono text-[10px] bg-purple-50 text-purple-700 font-bold px-1 py-0.2 rounded">
                       {referenceMetrics.nextSplit.bearingCompass}
                     </span>
                   )}
                 </div>
-                <div className="mt-1">
+                <div className="mt-0.5">
                   {referenceMetrics.nextSplit ? (
                     <>
-                      <div className="text-xl lg:text-2xl font-black text-purple-700 font-heading leading-tight truncate tracking-tight">
+                      <div className="text-lg md:text-xl font-black text-purple-700 font-heading leading-tight truncate tracking-tight">
                         {referenceMetrics.nextSplit.formattedRelative}
                       </div>
-                      <div className="text-[10.5px] font-bold text-slate-500 truncate mt-0.5">
+                      <div className="text-[10px] font-bold text-slate-500 truncate mt-0.5">
                         {referenceMetrics.nextSplit.name}
                       </div>
                     </>
                   ) : (
-                    <div className="text-xs font-bold text-emerald-600 flex items-center gap-1 mt-1">
+                    <div className="text-xs font-bold text-emerald-600 flex items-center gap-1">
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Célba értél!</span>
+                      <span>Célban!</span>
                     </div>
                   )}
                 </div>
               </div>
 
-              {/* Card 2: Starttól való távolság (pl. +1.25 km) */}
-              <div className="bg-white rounded-2xl p-2.5 lg:p-3 shadow-xs border border-slate-200/80 flex flex-col justify-between">
-                <span className="text-[10.5px] font-bold text-slate-400 uppercase">
-                  Starttól Táv
+              {/* Card 2: Starttól táv */}
+              <div className="bg-white rounded-xl p-2 shadow-2xs border border-slate-200/80 flex flex-col justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">
+                  Starttól
                 </span>
-                <div className="mt-1">
-                  <div className="text-xl lg:text-2xl font-black text-emerald-600 font-heading leading-tight tracking-tight">
+                <div className="mt-0.5">
+                  <div className="text-lg md:text-xl font-black text-emerald-600 font-heading leading-tight tracking-tight">
                     {referenceMetrics.formattedDistanceFromStart}
-                  </div>
-                  <div className="text-[10px] font-medium text-slate-400 mt-0.5">
-                    Start ponttól
                   </div>
                 </div>
               </div>
 
-              {/* Card 3: Stophoz / Célhoz viszonyított távolság (pl. -3.45 km) */}
-              <div className="bg-white rounded-2xl p-2.5 lg:p-3 shadow-xs border border-slate-200/80 flex flex-col justify-between">
-                <span className="text-[10.5px] font-bold text-slate-400 uppercase">
-                  Célig Hátralévő
+              {/* Card 3: Célig táv */}
+              <div className="bg-white rounded-xl p-2 shadow-2xs border border-slate-200/80 flex flex-col justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">
+                  Célig
                 </span>
-                <div className="mt-1">
-                  <div className="text-xl lg:text-2xl font-black text-rose-600 font-heading leading-tight tracking-tight">
+                <div className="mt-0.5">
+                  <div className="text-lg md:text-xl font-black text-rose-600 font-heading leading-tight tracking-tight">
                     {referenceMetrics.formattedDistanceToEnd}
-                  </div>
-                  <div className="text-[10px] font-medium text-slate-400 mt-0.5">
-                    Célvonalig
                   </div>
                 </div>
               </div>
             </div>
           ) : (
             /* Standard Live Metrics if no track is loaded */
-            <div className="flex-shrink-0 grid grid-cols-2 gap-2.5">
+            <div className="flex-shrink-0 grid grid-cols-2 gap-1.5">
               {/* Left: Time Card */}
-              <div className="bg-white rounded-2xl px-4 py-2.5 shadow-xs border border-slate-200/80 flex flex-col justify-between">
-                <div className="flex items-center justify-between text-xs font-bold text-slate-500">
-                  <span>Eltelt Idő</span>
-                  <span className="text-slate-400">Kezdés: {displayClock}</span>
-                </div>
-                <span className="text-xl lg:text-2xl font-black text-slate-900 tracking-tight leading-tight mt-0.5 font-heading">
+              <div className="bg-white rounded-xl px-3 py-1.5 shadow-2xs border border-slate-200/80 flex flex-col justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Eltelt Idő</span>
+                <span className="text-lg md:text-xl font-black text-slate-900 tracking-tight leading-tight font-heading">
                   {formatElapsedTime(elapsedSeconds)}
                 </span>
               </div>
@@ -587,41 +568,33 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                 id="btn-desktop-coordinates-card"
                 onClick={onOpenCoordinates}
                 title="Kattints a koordináták részleteihez és másolásához"
-                className="bg-white hover:bg-blue-50/40 rounded-2xl px-4 py-2.5 shadow-xs border border-slate-200/80 hover:border-blue-300 flex flex-col justify-between text-left transition-all active:scale-98 cursor-pointer relative group"
+                className="bg-white hover:bg-blue-50/40 rounded-xl px-3 py-1.5 shadow-2xs border border-slate-200/80 hover:border-blue-300 flex flex-col justify-between text-left transition-all active:scale-98 cursor-pointer relative group"
               >
-                <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+                <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase">
                   <span>GPS Pozíció</span>
-                  <MapPin className="w-3.5 h-3.5 text-[#0060e6] group-hover:scale-110 transition-transform" />
+                  <MapPin className="w-3 h-3 text-[#0060e6] group-hover:scale-110 transition-transform" />
                 </div>
-                {settings.coordinateFormat === 'dms' ? (
-                  <div className="mt-0.5 font-mono font-bold text-slate-800 text-[12.5px] lg:text-[13.5px] leading-tight">
-                    <div>{dms.latDms}</div>
-                    <div className="text-slate-600">{dms.lngDms}</div>
-                  </div>
-                ) : (
-                  <div className="mt-0.5 font-mono font-bold text-slate-800 text-[12.5px] lg:text-[13.5px] leading-tight">
-                    <div>{activeLat.toFixed(6)}°</div>
-                    <div className="text-slate-600">{activeLng.toFixed(6)}°</div>
-                  </div>
-                )}
+                <div className="font-mono font-bold text-slate-800 text-xs truncate">
+                  {activeLat.toFixed(5)}°, {activeLng.toFixed(5)}°
+                </div>
               </button>
             </div>
           )}
 
           {/* 3. Görgethető Résztávok (Splits) Panel */}
-          <div className="flex-1 flex flex-col min-h-0 bg-white/70 rounded-2xl border border-slate-200/80 p-3 shadow-xs overflow-hidden">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100 flex-shrink-0">
-              <div className="flex items-center gap-2">
+          <div className="flex-1 flex flex-col min-h-0 bg-white/90 rounded-2xl border border-slate-200/80 p-2.5 shadow-xs overflow-hidden">
+            <div className="flex items-center justify-between pb-1.5 border-b border-slate-100 flex-shrink-0">
+              <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => setSplitsTab('active')}
-                  className={`text-xs font-black uppercase tracking-wider font-heading flex items-center gap-1.5 px-2.5 py-1 rounded-xl transition-all cursor-pointer ${
+                  className={`text-xs font-black uppercase tracking-wider font-heading flex items-center gap-1 px-2 py-0.5 rounded-lg transition-all cursor-pointer ${
                     splitsTab === 'active'
                       ? 'bg-blue-100 text-[#0050cb]'
                       : 'text-slate-400 hover:text-slate-700'
                   }`}
                 >
-                  <Flag className="w-3.5 h-3.5 text-[#0060e6]" />
+                  <Flag className="w-3 h-3 text-[#0060e6]" />
                   <span>Rögzített ({splits.length})</span>
                 </button>
 
@@ -629,21 +602,17 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                   <button
                     type="button"
                     onClick={() => setSplitsTab('loaded')}
-                    className={`text-xs font-black uppercase tracking-wider font-heading flex items-center gap-1.5 px-2.5 py-1 rounded-xl transition-all cursor-pointer ${
+                    className={`text-xs font-black uppercase tracking-wider font-heading flex items-center gap-1 px-2 py-0.5 rounded-lg transition-all cursor-pointer ${
                       splitsTab === 'loaded'
                         ? 'bg-purple-100 text-purple-700'
                         : 'text-slate-400 hover:text-slate-700'
                     }`}
                   >
-                    <Target className="w-3.5 h-3.5 text-purple-600" />
+                    <Target className="w-3 h-3 text-purple-600" />
                     <span>Betöltött Pontok ({referenceMetrics?.splitsProgress.length || loadedSessionSplits?.length || 0})</span>
                   </button>
                 )}
               </div>
-
-              <span className="text-[11px] font-medium text-slate-400">
-                Kattints a térképes pozícióhoz
-              </span>
             </div>
 
             <div
@@ -859,16 +828,16 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
 
                           <div className="flex items-center gap-2 flex-shrink-0">
                             <div className="flex flex-col items-end">
-                              <span className={`font-black font-heading font-mono ${
+                              <span className={`font-black font-heading font-mono tracking-tight ${
                                 isActivePoint
-                                  ? 'text-purple-700 text-lg sm:text-xl'
+                                  ? 'text-purple-700 text-xl sm:text-2xl'
                                   : sp.isPassed
-                                  ? 'text-emerald-600 text-base'
-                                  : 'text-slate-800 text-base'
+                                  ? 'text-emerald-600 text-lg sm:text-xl'
+                                  : 'text-slate-800 text-lg sm:text-xl'
                               }`}>
                                 {sp.formattedRelative}
                               </span>
-                              <span className="text-[10px] text-slate-400 font-mono">
+                              <span className="text-[11px] text-slate-500 font-mono font-medium">
                                 Irány: {sp.bearingCompass}
                               </span>
                             </div>
@@ -1298,8 +1267,8 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <span className={`font-black font-mono ${
-                          isActivePoint ? 'text-purple-700 text-base' : sp.isPassed ? 'text-emerald-600 text-sm' : 'text-slate-800 text-sm'
+                        <span className={`font-black font-mono tracking-tight ${
+                          isActivePoint ? 'text-purple-700 text-lg' : sp.isPassed ? 'text-emerald-600 text-base' : 'text-slate-800 text-base'
                         }`}>
                           {sp.formattedRelative}
                         </span>

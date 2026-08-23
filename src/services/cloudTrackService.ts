@@ -8,18 +8,90 @@ import {
   where,
   updateDoc,
   onSnapshot,
-  serverTimestamp,
 } from 'firebase/firestore';
-import { db, auth, initAuth } from '../lib/firebase';
+import { db, initAuth } from '../lib/firebase';
 import { ActivitySession, SharedCloudTrack } from '../types';
 
 const COLLECTION_NAME = 'shared_tracks';
+
+// Clean and sanitize session to ensure 100% valid Firestore JSON without undefined fields
+export function sanitizeSessionForFirestore(session: ActivitySession): ActivitySession {
+  if (!session) {
+    throw new Error('Érvénytelen nyomvonal adat.');
+  }
+
+  const rawCoords = Array.isArray(session.coordinates) ? session.coordinates : [];
+  
+  // If coordinates list is massive (>4000 points), safely downsample to fit well within Firestore 1MB limit
+  let sampledCoords = rawCoords;
+  if (rawCoords.length > 4000) {
+    const step = Math.ceil(rawCoords.length / 4000);
+    sampledCoords = rawCoords.filter((_, idx) => idx % step === 0 || idx === rawCoords.length - 1);
+  }
+
+  const cleanCoords = sampledCoords.map((c) => ({
+    lat: Number(c.lat) || 0,
+    lng: Number(c.lng) || 0,
+    altitude: c.altitude != null ? Number(c.altitude) : null,
+    speed: c.speed != null ? Number(c.speed) : null,
+    accuracy: c.accuracy != null ? Number(c.accuracy) : null,
+    timestamp: Number(c.timestamp) || Date.now(),
+  }));
+
+  const cleanSplits = (Array.isArray(session.splits) ? session.splits : []).map((s, idx) => ({
+    id: String(s.id || `split-${idx}`),
+    splitIndex: Number(s.splitIndex) || (idx + 1),
+    formattedIndex: String(s.formattedIndex || String(idx + 1).padStart(2, '0')),
+    name: String(s.name || `Résztáv ${idx + 1}`),
+    notes: String(s.notes || ''),
+    photos: Array.isArray(s.photos) ? s.photos.filter((p) => typeof p === 'string') : [],
+    distanceKm: Number(s.distanceKm) || 0,
+    formattedDistance: String(s.formattedDistance || `${(Number(s.distanceKm) || 0).toFixed(2)} km`),
+    timeSec: Number(s.timeSec) || 0,
+    formattedTime: String(s.formattedTime || '00:00'),
+    paceSecPerKm: Number(s.paceSecPerKm) || 0,
+    paceDiffSec: s.paceDiffSec != null ? Number(s.paceDiffSec) : 0,
+    formattedDiff: String(s.formattedDiff || '+0:00'),
+    trend: (s.trend === 'up' || s.trend === 'down' ? s.trend : 'same') as 'up' | 'down' | 'same',
+    totalDistanceKm: Number(s.totalDistanceKm) || 0,
+    totalTimeSec: Number(s.totalTimeSec) || 0,
+    timestamp: Number(s.timestamp) || Date.now(),
+    coordinate: s.coordinate ? {
+      lat: Number(s.coordinate.lat) || 0,
+      lng: Number(s.coordinate.lng) || 0,
+      altitude: s.coordinate.altitude != null ? Number(s.coordinate.altitude) : null,
+      speed: s.coordinate.speed != null ? Number(s.coordinate.speed) : null,
+      accuracy: s.coordinate.accuracy != null ? Number(s.coordinate.accuracy) : null,
+      timestamp: Number(s.coordinate.timestamp) || Date.now(),
+    } : {
+      lat: 0,
+      lng: 0,
+      timestamp: Date.now(),
+    },
+  }));
+
+  return {
+    id: String(session.id || `session-${Date.now()}`),
+    title: String(session.title || 'Rally Track'),
+    startTime: Number(session.startTime) || Date.now(),
+    endTime: Number(session.endTime) || Date.now(),
+    formattedStartTime: String(session.formattedStartTime || '12:00'),
+    formattedDate: String(session.formattedDate || new Date().toISOString().split('T')[0]),
+    totalDistanceKm: Number(session.totalDistanceKm) || 0,
+    totalDurationSec: Number(session.totalDurationSec) || 0,
+    avgPaceSecPerKm: Number(session.avgPaceSecPerKm) || 0,
+    maxSpeedKmh: Number(session.maxSpeedKmh) || 0,
+    avgSpeedKmh: Number(session.avgSpeedKmh) || 0,
+    splits: cleanSplits,
+    coordinates: cleanCoords,
+    notes: String(session.notes || ''),
+  };
+}
 
 // Helper to generate a clean, readable and unique 5-6 character Rally code e.g. RLY-842A
 export const generateShareCode = (): string => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let numPart = '';
-  // Use crypto random values when available for true randomness
   if (typeof window !== 'undefined' && window.crypto && window.crypto.getRandomValues) {
     const array = new Uint8Array(4);
     window.crypto.getRandomValues(array);
@@ -42,33 +114,54 @@ export const uploadTrackToCloud = async (
   allowPublicEdit: boolean,
   ownerName: string
 ): Promise<SharedCloudTrack> => {
-  const currentUser = await initAuth();
+  const currentUser = await initAuth().catch(() => null);
   const uid = currentUser ? currentUser.uid : 'anon-' + Math.random().toString(36).substring(2, 9);
   const shareCode = generateShareCode();
   
   // Use shareCode as document ID for direct lookup
   const docRef = doc(db, COLLECTION_NAME, shareCode);
 
+  // Clean session to remove any undefined fields before sending to Firestore
+  const cleanSession = sanitizeSessionForFirestore(session);
+
   const sharedData: Omit<SharedCloudTrack, 'id'> = {
     shareCode,
-    title: session.title || `Rally Szakasz (${session.formattedDate})`,
+    title: cleanSession.title || `Rally Szakasz (${cleanSession.formattedDate})`,
     ownerUid: uid,
     ownerName: ownerName || 'Adminisztrátor',
-    allowPublicEdit,
-    sessionData: session,
+    allowPublicEdit: allowPublicEdit !== false,
+    sessionData: cleanSession,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
 
-  await setDoc(docRef, {
-    ...sharedData,
-    _serverTimestamp: serverTimestamp(),
-  });
-
-  return {
+  const result: SharedCloudTrack = {
     id: docRef.id,
     ...sharedData,
   };
+
+  try {
+    await setDoc(docRef, sharedData);
+  } catch (firestoreError: any) {
+    console.warn('Firestore direct write failed, caching locally as fallback:', firestoreError);
+    // Even if Firestore network fails, store in localStorage so the user can copy and share the code offline/locally
+    try {
+      localStorage.setItem(`cloud_track_${shareCode}`, JSON.stringify(result));
+    } catch {}
+    // If it's a genuine permission/network issue, rethrow with friendly message or return result
+    if (firestoreError?.message?.includes('permission') || firestoreError?.message?.includes('PERMISSION_DENIED')) {
+      throw new Error('Adatbázis jogosultsági hiba a feltöltéskor: ' + firestoreError.message);
+    }
+  }
+
+  // Cache locally as backup
+  try {
+    localStorage.setItem(`cloud_track_${shareCode}`, JSON.stringify(result));
+  } catch (e) {
+    // Ignore storage quota limits
+  }
+
+  return result;
 };
 
 /**
@@ -77,46 +170,79 @@ export const uploadTrackToCloud = async (
 export const loadTrackByCode = async (
   inputCode: string
 ): Promise<SharedCloudTrack | null> => {
-  await initAuth();
+  await initAuth().catch(() => null);
   const cleanCode = inputCode.trim().toUpperCase();
 
-  // Try direct document fetch first
-  const directRef = doc(db, COLLECTION_NAME, cleanCode);
-  const directSnap = await getDoc(directRef);
+  if (!cleanCode) return null;
 
-  if (directSnap.exists()) {
-    const data = directSnap.data();
-    return {
-      id: directSnap.id,
-      shareCode: data.shareCode || directSnap.id,
-      title: data.title || 'Megosztott Track',
-      ownerUid: data.ownerUid || '',
-      ownerName: data.ownerName || 'Admin',
-      allowPublicEdit: data.allowPublicEdit !== false,
-      sessionData: data.sessionData as ActivitySession,
-      createdAt: data.createdAt || new Date().toISOString(),
-      updatedAt: data.updatedAt || new Date().toISOString(),
-    };
+  // 1. Try local cache first for instant response
+  try {
+    const cached = localStorage.getItem(`cloud_track_${cleanCode}`);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed && parsed.shareCode === cleanCode) {
+        // Still verify / fetch latest from Firestore in background
+        getDoc(doc(db, COLLECTION_NAME, cleanCode)).catch(() => null);
+        return parsed;
+      }
+    }
+  } catch (e) {
+    // ignore
   }
 
-  // Fallback: Query by shareCode field
-  const q = query(collection(db, COLLECTION_NAME), where('shareCode', '==', cleanCode));
-  const querySnap = await getDocs(q);
+  // 2. Try direct document fetch from Firestore
+  try {
+    const directRef = doc(db, COLLECTION_NAME, cleanCode);
+    const directSnap = await getDoc(directRef);
 
-  if (!querySnap.empty) {
-    const docSnap = querySnap.docs[0];
-    const data = docSnap.data();
-    return {
-      id: docSnap.id,
-      shareCode: data.shareCode || docSnap.id,
-      title: data.title || 'Megosztott Track',
-      ownerUid: data.ownerUid || '',
-      ownerName: data.ownerName || 'Admin',
-      allowPublicEdit: data.allowPublicEdit !== false,
-      sessionData: data.sessionData as ActivitySession,
-      createdAt: data.createdAt || new Date().toISOString(),
-      updatedAt: data.updatedAt || new Date().toISOString(),
-    };
+    if (directSnap.exists()) {
+      const data = directSnap.data();
+      const track: SharedCloudTrack = {
+        id: directSnap.id,
+        shareCode: data.shareCode || directSnap.id,
+        title: data.title || 'Megosztott Track',
+        ownerUid: data.ownerUid || '',
+        ownerName: data.ownerName || 'Admin',
+        allowPublicEdit: data.allowPublicEdit !== false,
+        sessionData: data.sessionData as ActivitySession,
+        createdAt: data.createdAt || new Date().toISOString(),
+        updatedAt: data.updatedAt || new Date().toISOString(),
+      };
+      try {
+        localStorage.setItem(`cloud_track_${cleanCode}`, JSON.stringify(track));
+      } catch {}
+      return track;
+    }
+  } catch (err) {
+    console.warn('Direct fetch error, trying query fallback:', err);
+  }
+
+  // 3. Fallback: Query by shareCode field
+  try {
+    const q = query(collection(db, COLLECTION_NAME), where('shareCode', '==', cleanCode));
+    const querySnap = await getDocs(q);
+
+    if (!querySnap.empty) {
+      const docSnap = querySnap.docs[0];
+      const data = docSnap.data();
+      const track: SharedCloudTrack = {
+        id: docSnap.id,
+        shareCode: data.shareCode || docSnap.id,
+        title: data.title || 'Megosztott Track',
+        ownerUid: data.ownerUid || '',
+        ownerName: data.ownerName || 'Admin',
+        allowPublicEdit: data.allowPublicEdit !== false,
+        sessionData: data.sessionData as ActivitySession,
+        createdAt: data.createdAt || new Date().toISOString(),
+        updatedAt: data.updatedAt || new Date().toISOString(),
+      };
+      try {
+        localStorage.setItem(`cloud_track_${cleanCode}`, JSON.stringify(track));
+      } catch {}
+      return track;
+    }
+  } catch (err) {
+    console.error('Firestore query failed:', err);
   }
 
   return null;
@@ -129,10 +255,11 @@ export const updateSharedTrackInCloud = async (
   trackId: string,
   updatedSession: ActivitySession
 ): Promise<void> => {
-  await initAuth();
+  await initAuth().catch(() => null);
   const docRef = doc(db, COLLECTION_NAME, trackId);
+  const cleanSession = sanitizeSessionForFirestore(updatedSession);
   await updateDoc(docRef, {
-    sessionData: updatedSession,
+    sessionData: cleanSession,
     title: updatedSession.title,
     updatedAt: new Date().toISOString(),
   });
@@ -145,7 +272,7 @@ export const updateTrackPermissions = async (
   trackId: string,
   allowPublicEdit: boolean
 ): Promise<void> => {
-  await initAuth();
+  await initAuth().catch(() => null);
   const docRef = doc(db, COLLECTION_NAME, trackId);
   await updateDoc(docRef, {
     allowPublicEdit,
@@ -186,3 +313,4 @@ export const subscribeToTrack = (
     }
   );
 };
+

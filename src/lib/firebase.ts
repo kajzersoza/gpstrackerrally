@@ -12,21 +12,46 @@ export const db = getFirestore(
 
 export const auth = getAuth(app);
 
-// Ensure anonymous authentication is initialized
+let authInitPromise: Promise<User | null> | null = null;
+
+// Ensure anonymous authentication is initialized (non-blocking fallback)
 export const initAuth = (): Promise<User | null> => {
-  return new Promise((resolve) => {
-    onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        resolve(user);
-      } else {
-        try {
-          const cred = await signInAnonymously(auth);
-          resolve(cred.user);
-        } catch (error) {
-          console.warn('Firebase anonymous auth failed, proceeding in offline mode', error);
-          resolve(null);
+  if (auth.currentUser) {
+    return Promise.resolve(auth.currentUser);
+  }
+  if (authInitPromise) {
+    return authInitPromise;
+  }
+
+  authInitPromise = new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      resolve(auth.currentUser);
+    }, 2000);
+
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      async (user) => {
+        clearTimeout(timeout);
+        unsubscribe();
+        if (user) {
+          resolve(user);
+        } else {
+          try {
+            const cred = await signInAnonymously(auth);
+            resolve(cred.user);
+          } catch (error) {
+            console.warn('Firebase anonymous auth optional, proceeding:', error);
+            resolve(null);
+          }
         }
+      },
+      (error) => {
+        clearTimeout(timeout);
+        console.warn('Firebase auth state error:', error);
+        resolve(null);
       }
-    });
+    );
   });
+
+  return authInitPromise;
 };

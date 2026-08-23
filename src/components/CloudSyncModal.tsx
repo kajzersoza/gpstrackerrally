@@ -82,6 +82,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
   const handleUpload = async () => {
     if (!sessionToShare) return;
     setIsUploading(true);
+    setLoadError(null);
     try {
       const result = await uploadTrackToCloud(
         sessionToShare,
@@ -91,7 +92,7 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
       setUploadedTrack(result);
     } catch (err: any) {
       console.error('Error uploading track:', err);
-      alert('Hiba történt a felhőbe mentéskor: ' + (err.message || err));
+      setLoadError('Hiba történt a felhőbe mentéskor: ' + (err.message || err));
     } finally {
       setIsUploading(false);
     }
@@ -264,6 +265,14 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
                       </button>
                     </div>
                   </div>
+
+                  {/* Error Message */}
+                  {loadError && (
+                    <div className="p-3 bg-red-50 text-red-700 rounded-2xl text-xs font-semibold border border-red-100 flex items-center gap-2">
+                      <ShieldAlert className="w-4 h-4 flex-shrink-0" />
+                      <span>{loadError}</span>
+                    </div>
+                  )}
 
                   {/* Upload button */}
                   <button
