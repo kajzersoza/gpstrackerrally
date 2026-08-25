@@ -27,6 +27,7 @@ interface SplitDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (updatedSplit: Split) => void;
+  onDelete?: (splitId: string) => void;
 }
 
 export const SplitDetailModal: React.FC<SplitDetailModalProps> = ({
@@ -37,12 +38,14 @@ export const SplitDetailModal: React.FC<SplitDetailModalProps> = ({
   isOpen,
   onClose,
   onSave,
+  onDelete,
 }) => {
   const [name, setName] = useState(split.name || '');
   const [notes, setNotes] = useState(split.notes || '');
   const [photos, setPhotos] = useState<string[]>(split.photos || []);
   const [previewPhoto, setPreviewPhoto] = useState<string | null>(null);
   const [copiedToast, setCopiedToast] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
@@ -385,6 +388,29 @@ export const SplitDetailModal: React.FC<SplitDetailModalProps> = ({
 
         {/* Footer Actions */}
         <footer className="flex-shrink-0 flex items-center gap-2 px-5 py-3.5 border-t border-slate-100 bg-[#f8faff]">
+          {onDelete && (
+            <button
+              type="button"
+              onClick={() => {
+                if (showDeleteConfirm) {
+                  onDelete(split.id);
+                  onClose();
+                } else {
+                  setShowDeleteConfirm(true);
+                  setTimeout(() => setShowDeleteConfirm(false), 4000);
+                }
+              }}
+              className={`px-3 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                showDeleteConfirm
+                  ? 'bg-red-600 hover:bg-red-700 text-white animate-pulse'
+                  : 'bg-red-50 hover:bg-red-100 text-red-600 border border-red-200'
+              }`}
+              title="Résztáv / ellenőrzőpont törlése"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>{showDeleteConfirm ? 'Biztosan törlöd?' : 'Törlés'}</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -395,10 +421,10 @@ export const SplitDetailModal: React.FC<SplitDetailModalProps> = ({
           <button
             type="button"
             onClick={handleShare}
-            className="px-4 py-2.5 rounded-xl font-bold text-sm bg-blue-50 hover:bg-blue-100 text-[#0050cb] flex items-center gap-1.5 transition-colors cursor-pointer"
+            className="px-3.5 py-2.5 rounded-xl font-bold text-sm bg-blue-50 hover:bg-blue-100 text-[#0050cb] flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Share2 className="w-4 h-4" />
-            <span>Megosztás</span>
+            <span className="hidden sm:inline">Megosztás</span>
           </button>
           <button
             type="button"

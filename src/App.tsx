@@ -68,7 +68,6 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const [isCoordinateModalOpen, setIsCoordinateModalOpen] = useState<boolean>(false);
-  const [isRoutePlannerOpen, setIsRoutePlannerOpen] = useState<boolean>(false);
 
   // Settings
   const [settings, setSettings] = useState<UserSettings>(() => {
@@ -126,9 +125,29 @@ export default function App() {
     setLoadedSession(null);
   };
 
+  // Route Planner state
+  const [isRoutePlannerOpen, setIsRoutePlannerOpen] = useState<boolean>(false);
+  const [sessionForRoutePlanner, setSessionForRoutePlanner] = useState<ActivitySession | null>(null);
+
+  const handleOpenRoutePlannerNew = () => {
+    setSessionForRoutePlanner(null);
+    setIsRoutePlannerOpen(true);
+  };
+
+  const handleEditSessionInPlanner = (session: ActivitySession) => {
+    setSessionForRoutePlanner(session);
+    setIsRoutePlannerOpen(true);
+  };
+
   const handleSavePlannedSession = (session: ActivitySession, loadForTracking: boolean = false) => {
     setSavedSessions((prev) => {
-      const updatedList = [session, ...prev];
+      const existsIndex = prev.findIndex((s) => s.id === session.id);
+      let updatedList: ActivitySession[];
+      if (existsIndex >= 0) {
+        updatedList = prev.map((s) => (s.id === session.id ? session : s));
+      } else {
+        updatedList = [session, ...prev];
+      }
       try {
         localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(updatedList));
       } catch {
@@ -909,7 +928,8 @@ export default function App() {
               onOpenCloudShare={handleOpenCloudShare}
               onOpenCloudLoad={handleOpenCloudLoad}
               onLoadSessionForTracking={handleLoadSessionForTracking}
-              onOpenRoutePlanner={() => setIsRoutePlannerOpen(true)}
+              onOpenRoutePlanner={handleOpenRoutePlannerNew}
+              onEditSessionInPlanner={handleEditSessionInPlanner}
             />
           )}
 
@@ -950,7 +970,7 @@ export default function App() {
           onClose={() => setIsSettingsOpen(false)}
           onUpdateSettings={handleUpdateSettings}
           onResetDefaults={handleResetData}
-          onOpenRoutePlanner={() => setIsRoutePlannerOpen(true)}
+          onOpenRoutePlanner={handleOpenRoutePlannerNew}
         />
 
         <MenuDrawer
@@ -962,14 +982,18 @@ export default function App() {
           onExportCurrentGPX={handleExportCurrentGPX}
           onResetData={handleResetData}
           onOpenCloudSync={handleOpenCloudLoad}
-          onOpenRoutePlanner={() => setIsRoutePlannerOpen(true)}
+          onOpenRoutePlanner={handleOpenRoutePlannerNew}
           hasTrackData={coordinates.length > 0}
         />
 
         {/* Route Planner / Tervező Modal */}
         <RoutePlannerModal
           isOpen={isRoutePlannerOpen}
-          onClose={() => setIsRoutePlannerOpen(false)}
+          initialSession={sessionForRoutePlanner}
+          onClose={() => {
+            setIsRoutePlannerOpen(false);
+            setSessionForRoutePlanner(null);
+          }}
           settings={settings}
           currentGpsLocation={currentLocation}
           onSavePlannedSession={handleSavePlannedSession}

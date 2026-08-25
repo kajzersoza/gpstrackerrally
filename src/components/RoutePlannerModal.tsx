@@ -27,6 +27,7 @@ import {
   HelpCircle,
   Flag,
   Target,
+  Copy,
 } from 'lucide-react';
 import {
   Coordinate,
@@ -52,6 +53,7 @@ interface RoutePlannerModalProps {
   onClose: () => void;
   settings: UserSettings;
   currentGpsLocation: Coordinate | null;
+  initialSession?: ActivitySession | null;
   onSavePlannedSession: (session: ActivitySession, loadForTracking?: boolean) => void;
 }
 
@@ -109,11 +111,111 @@ function projectPointOnSegment(
   return { projLat, projLng, distKm, t };
 }
 
+/**
+ * Converts an existing ActivitySession (recorded or planned) into editable PlannedPoints
+ */
+function sessionToPlannedPoints(session: ActivitySession): PlannedPoint[] {
+  const coords = session.coordinates || [];
+  const splits = session.splits || [];
+
+  if (coords.length === 0 && splits.length === 0) {
+    return [];
+  }
+
+  if (coords.length > 0) {
+    // Map splits to closest coordinate index
+    const splitMap = new Map<number, Split>();
+
+    splits.forEach((sp) => {
+      if (sp.coordinate && (sp.coordinate.lat !== 0 || sp.coordinate.lng !== 0)) {
+        let closestIdx = 0;
+        let minD = Infinity;
+        coords.forEach((c, idx) => {
+          const d = calculateDistance(sp.coordinate!.lat, sp.coordinate!.lng, c.lat, c.lng);
+          if (d < minD) {
+            minD = d;
+            closestIdx = idx;
+          }
+        });
+        splitMap.set(closestIdx, sp);
+      }
+    });
+
+    const indicesToKeep = new Set<number>();
+    indicesToKeep.add(0);
+    indicesToKeep.add(coords.length - 1);
+    splitMap.forEach((_, idx) => indicesToKeep.add(idx));
+
+    // Downsample dense tracks (> 200 pts) while keeping all key vertices and splits intact
+    const step = coords.length > 200 ? Math.ceil(coords.length / 140) : 1;
+    for (let i = 0; i < coords.length; i += step) {
+      indicesToKeep.add(i);
+    }
+
+    const sortedIndices = Array.from(indicesToKeep).sort((a, b) => a - b);
+    const plannedPoints: PlannedPoint[] = [];
+    let cum = 0;
+
+    for (let i = 0; i < sortedIndices.length; i++) {
+      const coordIdx = sortedIndices[i];
+      const c = coords[coordIdx];
+      const associatedSplit = splitMap.get(coordIdx);
+
+      const isStart = i === 0;
+      const isEnd = i === sortedIndices.length - 1 && sortedIndices.length > 1;
+      const isSplit = !!associatedSplit || isStart || isEnd;
+
+      let distFromPrev = 0;
+      if (i > 0) {
+        const prevC = coords[sortedIndices[i - 1]];
+        distFromPrev = calculateDistance(prevC.lat, prevC.lng, c.lat, c.lng);
+        cum += distFromPrev;
+      }
+
+      plannedPoints.push({
+        id: associatedSplit?.id || `plan-pt-${coordIdx}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        lat: c.lat,
+        lng: c.lng,
+        isSplit,
+        name: associatedSplit?.name || (isStart ? 'START' : isEnd ? 'CÉL' : ''),
+        notes: associatedSplit?.notes,
+        distanceFromPrevKm: +distFromPrev.toFixed(4),
+        cumulativeDistKm: +cum.toFixed(4),
+      });
+    }
+
+    return plannedPoints;
+  }
+
+  // Fallback if coordinates are empty but splits exist
+  let cum = 0;
+  return splits.map((sp, idx) => {
+    const lat = sp.coordinate?.lat || 0;
+    const lng = sp.coordinate?.lng || 0;
+    let dist = 0;
+    if (idx > 0 && splits[idx - 1].coordinate) {
+      dist = calculateDistance(splits[idx - 1].coordinate!.lat, splits[idx - 1].coordinate!.lng, lat, lng);
+      cum += dist;
+    }
+    return {
+      id: sp.id,
+      lat,
+      lng,
+      isSplit: true,
+      name: sp.name || `Pont #${sp.formattedIndex}`,
+      notes: sp.notes,
+      distanceFromPrevKm: +dist.toFixed(4),
+      cumulativeDistKm: +cum.toFixed(4),
+    };
+  });
+}
+
 export const RoutePlannerModal: React.FC<RoutePlannerModalProps> = ({
   isOpen,
   onClose,
   settings,
   currentGpsLocation,
+  initialSession,
   onSavePlannedSession,
 }) => {
   const [points, setPoints] = useState<PlannedPoint[]>([]);
@@ -121,6 +223,7 @@ export const RoutePlannerModal: React.FC<RoutePlannerModalProps> = ({
   const [routeTitle, setRouteTitle] = useState<string>('Tervezett Rally Útvonal');
   const [targetSpeedKmh, setTargetSpeedKmh] = useState<number>(60);
   const [activityMode, setActivityMode] = useState<ActivityMode>(settings.activityMode || 'car');
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [mapLayer, setMapLayer] = useState<MapLayerType>(settings.mapLayer || 'osm');
   const [showLayerMenu, setShowLayerMenu] = useState<boolean>(false);
   const [showPointsList, setShowPointsList] = useState<boolean>(false);
@@ -149,6 +252,32 @@ export const RoutePlannerModal: React.FC<RoutePlannerModalProps> = ({
       setToastMessage(null);
     }, 2800);
   };
+
+  // Sync state when modal is opened or initialSession changes
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (initialSession) {
+      setRouteTitle(initialSession.title || 'Módosított Útvonal');
+      setTargetSpeedKmh(initialSession.avgSpeedKmh || 60);
+      setEditingSessionId(initialSession.id);
+      const converted = sessionToPlannedPoints(initialSession);
+      setPoints(converted);
+
+      setTimeout(() => {
+        if (mapRef.current && converted.length > 0) {
+          const bounds = L.latLngBounds(converted.map((p) => [p.lat, p.lng]));
+          mapRef.current.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+        }
+      }, 250);
+      showToast(`📝 "${initialSession.title}" betöltve szerkesztésre (${converted.length} pont)`);
+    } else {
+      setEditingSessionId(null);
+      setRouteTitle('Tervezett Rally Útvonal');
+      setTargetSpeedKmh(60);
+      setPoints([]);
+    }
+  }, [isOpen, initialSession]);
 
   // Initialize Leaflet Map
   useEffect(() => {
@@ -655,9 +784,9 @@ export const RoutePlannerModal: React.FC<RoutePlannerModalProps> = ({
   }, [totalDistanceKm, targetSpeedKmh]);
 
   // Construct standard ActivitySession & Splits ("mintha rendesen logoltunk volna")
-  const generateCompleteSession = (): ActivitySession => {
-    const startTime = Date.now() - estimatedTotalDurationSec * 1000;
-    const endTime = Date.now();
+  const generateCompleteSession = (forceNewId = false): ActivitySession => {
+    const startTime = initialSession && !forceNewId ? initialSession.startTime : Date.now() - estimatedTotalDurationSec * 1000;
+    const endTime = initialSession && !forceNewId ? initialSession.endTime : Date.now();
 
     // Generate high-density interpolated coordinates with realistic timestamps
     const coordinates: Coordinate[] = [];
@@ -721,7 +850,7 @@ export const RoutePlannerModal: React.FC<RoutePlannerModalProps> = ({
       const trendResult = calculateSplitTrend(paceSecPerKm, prevPace);
 
       const splitObj: Split = {
-        id: 'split-' + (idx + 1) + '-' + Date.now(),
+        id: sp.id.startsWith('split-') ? sp.id : 'split-' + (idx + 1) + '-' + Date.now(),
         splitIndex,
         formattedIndex,
         name: sp.name || (idx === 0 ? 'START' : idx === splitPoints.length - 1 ? 'CÉL' : `Pont #${idx}`),
@@ -754,9 +883,17 @@ export const RoutePlannerModal: React.FC<RoutePlannerModalProps> = ({
     const dateObj = new Date(startTime);
     const formattedDate = `${dateObj.getFullYear()}.${String(dateObj.getMonth() + 1).padStart(2, '0')}.${String(dateObj.getDate()).padStart(2, '0')}`;
 
+    const finalId = forceNewId
+      ? 'session-planned-' + Date.now()
+      : (editingSessionId || 'session-planned-' + Date.now());
+
+    const finalTitle = forceNewId && editingSessionId
+      ? `${routeTitle.trim()} (Másolat)`
+      : (routeTitle.trim() || 'Tervezett Rally Útvonal');
+
     return {
-      id: 'session-planned-' + Date.now(),
-      title: routeTitle.trim() || 'Tervezett Rally Útvonal',
+      id: finalId,
+      title: finalTitle,
       startTime,
       endTime,
       formattedStartTime: formatClockTime(startTime),
@@ -768,16 +905,16 @@ export const RoutePlannerModal: React.FC<RoutePlannerModalProps> = ({
       avgSpeedKmh: targetSpeedKmh,
       splits,
       coordinates,
-      notes: `Tervezővel létrehozott útvonal (${points.length} nyomvonal pont, ${splits.length} ellenőrzőpont). Átlagsebesség: ${targetSpeedKmh} km/h.`,
+      notes: initialSession?.notes || `Tervezővel létrehozott/szerkesztett útvonal (${points.length} pont, ${splits.length} ellenőrzőpont). Átlagsebesség: ${targetSpeedKmh} km/h.`,
     };
   };
 
-  const handleSaveToHistory = () => {
+  const handleSaveToHistory = (forceNewCopy = false) => {
     if (points.length < 2) {
       alert('Kérlek rajzolj legalább 2 pontot az útvonal létrehozásához!');
       return;
     }
-    const session = generateCompleteSession();
+    const session = generateCompleteSession(forceNewCopy);
     onSavePlannedSession(session, false);
     onClose();
   };
@@ -787,7 +924,7 @@ export const RoutePlannerModal: React.FC<RoutePlannerModalProps> = ({
       alert('Kérlek rajzolj legalább 2 pontot az útvonal létrehozásához!');
       return;
     }
-    const session = generateCompleteSession();
+    const session = generateCompleteSession(false);
     onSavePlannedSession(session, true);
     onClose();
   };
@@ -1145,24 +1282,53 @@ export const RoutePlannerModal: React.FC<RoutePlannerModalProps> = ({
           )}
 
           {/* Action Footer Buttons */}
-          <div className="p-3 bg-white flex flex-col sm:flex-row items-center gap-2 justify-end">
-            <button
-              onClick={handleSaveToHistory}
-              disabled={points.length < 2}
-              className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 text-slate-700 font-black text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs"
-            >
-              <Save className="w-4 h-4 text-[#0050cb]" />
-              <span>Mentés az Előzményekbe</span>
-            </button>
+          <div className="p-3 bg-white border-t border-slate-100 flex flex-col sm:flex-row items-center gap-2 justify-between">
+            <div className="text-xs text-slate-500 font-medium flex items-center gap-2">
+              {editingSessionId ? (
+                <span className="px-2 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg font-bold flex items-center gap-1">
+                  ✏️ Meglévő útvonal szerkesztése
+                </span>
+              ) : (
+                <span className="text-slate-400">
+                  {points.length} pont • {points.filter((p) => p.isSplit).length} résztáv
+                </span>
+              )}
+            </div>
 
-            <button
-              onClick={handleSaveAndStartTracking}
-              disabled={points.length < 2}
-              className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#0050cb] to-[#0066ff] hover:from-blue-700 hover:to-blue-600 disabled:opacity-40 text-white font-black text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
-            >
-              <Navigation className="w-4 h-4" />
-              <span>Mentés & Követés / Navigáció Indítása</span>
-            </button>
+            <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap justify-end">
+              {editingSessionId && (
+                <button
+                  type="button"
+                  onClick={() => handleSaveToHistory(true)}
+                  disabled={points.length < 2}
+                  className="w-full sm:w-auto px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+                  title="Mentés új útvonalként a meglévő megtartásával"
+                >
+                  <Copy className="w-3.5 h-3.5 text-slate-600" />
+                  <span>Mentés Új Másolatként</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => handleSaveToHistory(false)}
+                disabled={points.length < 2}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-blue-200 bg-blue-50 hover:bg-blue-100 disabled:opacity-40 text-[#0050cb] font-black text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+              >
+                <Save className="w-4 h-4 text-[#0050cb]" />
+                <span>{editingSessionId ? 'Módosítások Mentése' : 'Mentés az Előzményekbe'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSaveAndStartTracking}
+                disabled={points.length < 2}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#0050cb] to-[#0066ff] hover:from-blue-700 hover:to-blue-600 disabled:opacity-40 text-white font-black text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
+              >
+                <Navigation className="w-4 h-4" />
+                <span>Mentés & Navigáció</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1257,21 +1423,33 @@ export const RoutePlannerModal: React.FC<RoutePlannerModalProps> = ({
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setEditingPointId(null)}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 font-bold"
+                  onClick={() => handleDeleteSpecificPoint(editingPointId)}
+                  className="px-2.5 py-1.5 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 font-bold flex items-center gap-1 text-xs cursor-pointer"
+                  title="Pont törlése az útvonalból"
                 >
-                  Mégse
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Törlés</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={handleSavePointEdit}
-                  className="px-4 py-1.5 rounded-xl bg-[#0050cb] text-white font-bold shadow-sm"
-                >
-                  Alkalmaz
-                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingPointId(null)}
+                    className="px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 font-bold"
+                  >
+                    Mégse
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSavePointEdit}
+                    className="px-4 py-1.5 rounded-xl bg-[#0050cb] text-white font-bold shadow-sm"
+                  >
+                    Alkalmaz
+                  </button>
+                </div>
               </div>
             </div>
           </div>

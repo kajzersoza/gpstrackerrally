@@ -1,9 +1,39 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    function incoming() {
+      return request.resource.data;
+    }
+    function existing() {
+      return resource.data;
+    }
+
     match /shared_tracks/{trackId} {
-      // Allow read and write for all shared rally and gps tracks
-      allow read, write: if true;
+      // Allow reading tracks by shareCode / doc ID
+      allow get: if isValidId(trackId);
+      allow list: if true;
+
+      // Allow creating shared tracks
+      allow create: if isValidId(trackId)
+        && incoming().shareCode is string
+        && incoming().title is string
+        && incoming().allowPublicEdit is bool
+        && incoming().sessionData is map;
+
+      // Allow updating track if public editing is allowed or user is owner
+      allow update: if isValidId(trackId)
+        && (
+          existing().allowPublicEdit == true
+          || (request.auth != null && existing().ownerUid == request.auth.uid)
+          || (incoming().ownerUid == existing().ownerUid)
+        );
+
+      // Allow deleting if authenticated owner
+      allow delete: if isValidId(trackId)
+        && (request.auth != null && existing().ownerUid == request.auth.uid);
     }
   }
 }

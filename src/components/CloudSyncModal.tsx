@@ -92,7 +92,12 @@ export const CloudSyncModal: React.FC<CloudSyncModalProps> = ({
       setUploadedTrack(result);
     } catch (err: any) {
       console.error('Error uploading track:', err);
-      setLoadError('Hiba történt a felhőbe mentéskor: ' + (err.message || err));
+      let errMsg = err?.message || String(err);
+      try {
+        const parsed = JSON.parse(errMsg);
+        if (parsed?.error) errMsg = parsed.error;
+      } catch {}
+      setLoadError('Hiba történt a felhőbe mentéskor: ' + errMsg);
     } finally {
       setIsUploading(false);
     }

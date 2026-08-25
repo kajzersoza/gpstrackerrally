@@ -43,6 +43,7 @@ interface HistoryViewProps {
   onOpenCloudLoad?: () => void;
   onLoadSessionForTracking?: (session: ActivitySession) => void;
   onOpenRoutePlanner?: () => void;
+  onEditSessionInPlanner?: (session: ActivitySession) => void;
 }
 
 export const HistoryView: React.FC<HistoryViewProps> = ({
@@ -56,6 +57,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   onOpenCloudLoad,
   onLoadSessionForTracking,
   onOpenRoutePlanner,
+  onEditSessionInPlanner,
 }) => {
   const [selectedSession, setSelectedSession] = useState<ActivitySession | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<ActivitySession | null>(null);
@@ -93,6 +95,30 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     }
     setSessionToDelete(null);
     showToast('Tevékenység sikeresen törölve');
+  };
+
+  // Delete a specific split/checkpoint from the selected session
+  const handleDeleteSplit = (splitId: string) => {
+    if (!selectedSession) return;
+    const updatedSplits = selectedSession.splits.filter((s) => s.id !== splitId);
+    
+    // Recalculate formatted indices
+    const reindexedSplits = updatedSplits.map((s, idx) => ({
+      ...s,
+      splitIndex: idx + 1,
+      formattedIndex: String(idx + 1).padStart(2, '0'),
+    }));
+
+    const updatedSession: ActivitySession = {
+      ...selectedSession,
+      splits: reindexedSplits,
+    };
+
+    setSelectedSession(updatedSession);
+    if (onUpdateSession) {
+      onUpdateSession(updatedSession);
+    }
+    showToast('🗑️ Ellenőrzőpont törölve az útvonalból');
   };
 
   return (
@@ -151,10 +177,22 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
               <ArrowLeft className="w-5 h-5" />
               <span>Vissza</span>
             </button>
-            <h2 className="text-base font-black text-slate-800 truncate max-w-[220px] font-heading">
+            <h2 className="text-base font-black text-slate-800 truncate max-w-[180px] sm:max-w-xs font-heading">
               {selectedSession.title}
             </h2>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
+              {onEditSessionInPlanner && (
+                <button
+                  type="button"
+                  onClick={() => onEditSessionInPlanner(selectedSession)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-xl text-xs font-bold shadow-2xs active:scale-95 transition-all cursor-pointer"
+                  title="Útvonal és pontok szerkesztése, új pontok beszúrása, törlése a Térképes Tervezőben"
+                >
+                  <Route className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Pontok & Nyomvonal Szerkesztése</span>
+                  <span className="sm:hidden">Szerkesztés</span>
+                </button>
+              )}
               {onLoadSessionForTracking && (
                 <button
                   type="button"
@@ -249,7 +287,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       <h3 className="text-xs font-bold text-slate-700 flex items-center gap-1.5 uppercase tracking-wider">
                         <span>Útvonal Pontjai ({fullSplits.length})</span>
                       </h3>
-                      <span className="text-[11px] font-medium text-slate-400">Görgethető lista</span>
+                      {onEditSessionInPlanner && (
+                        <button
+                          type="button"
+                          onClick={() => onEditSessionInPlanner(selectedSession)}
+                          className="text-[11px] font-bold text-purple-700 hover:text-purple-900 bg-purple-50 hover:bg-purple-100 px-2 py-1 rounded-lg border border-purple-200 flex items-center gap-1 cursor-pointer transition-all active:scale-95"
+                          title="Új pontok beszúrása vagy módosítása a térképen"
+                        >
+                          <Route className="w-3 h-3" />
+                          <span>+ Új Pont / Szerkesztés</span>
+                        </button>
+                      )}
                     </div>
 
                     <div className="flex-1 overflow-y-auto min-h-0 space-y-2 mt-2 pr-1 custom-scrollbar overscroll-contain">
@@ -261,6 +309,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         fullSplits.map((split) => {
                           const isStart = split.id.startsWith('start') || split.splitIndex === 0 || split.formattedIndex === 'START';
                           const isStop = split.id.startsWith('stop') || split.formattedIndex === 'CÉL';
+                          const isIntermediate = !isStart && !isStop;
                           const splitDist = formatDistanceByUnit(split.distanceKm, settings.unit);
                           const totalKm = isStart ? 0 : isStop ? selectedSession.totalDistanceKm : getCumulativeDistanceForSplit(split, selectedSession.splits);
                           const totalDist = formatDistanceByUnit(totalKm, settings.unit);
@@ -347,10 +396,24 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                                       setEditingSplit(split);
                                     }}
                                     className="p-1.5 bg-white/80 hover:bg-white text-slate-700 hover:text-blue-700 rounded-lg shadow-2xs transition-all active:scale-90 cursor-pointer border border-slate-200"
-                                    title="Pont szerkesztése, megjegyzés, fotó, megosztás"
+                                    title="Pont szerkesztése, megjegyzés, fotó, sablonok"
                                   >
                                     <Edit3 className="w-3.5 h-3.5" />
                                   </button>
+
+                                  {isIntermediate && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteSplit(split.id);
+                                      }}
+                                      className="p-1.5 bg-white/80 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg shadow-2xs transition-all active:scale-90 cursor-pointer border border-slate-200"
+                                      title="Ellenőrzőpont törlése"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
                                 </div>
                               </div>
 
@@ -542,6 +605,21 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1 pl-2">
+                      {/* Direct Edit Route in Planner Button */}
+                      {onEditSessionInPlanner && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditSessionInPlanner(session);
+                          }}
+                          className="flex items-center gap-1 px-2.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-xl text-xs font-bold transition-all active:scale-95 cursor-pointer shadow-2xs"
+                          title="Útvonal és pontok szerkesztése a térképen"
+                        >
+                          <Route className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Szerkesztés</span>
+                        </button>
+                      )}
                       {/* Direct Load Track Button on List Card */}
                       {onLoadSessionForTracking && (
                         <button
@@ -605,6 +683,10 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           presets={settings.pointPresets}
           isOpen={true}
           onClose={() => setEditingSplit(null)}
+          onDelete={(splitId) => {
+            handleDeleteSplit(splitId);
+            setEditingSplit(null);
+          }}
           onSave={(updatedSplit) => {
             const updatedSplits = selectedSession.splits.map((s) =>
               s.id === updatedSplit.id ? updatedSplit : s

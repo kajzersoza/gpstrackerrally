@@ -9,10 +9,57 @@ import {
   updateDoc,
   onSnapshot,
 } from 'firebase/firestore';
-import { db, initAuth } from '../lib/firebase';
+import { db, auth, initAuth } from '../lib/firebase';
 import { ActivitySession, SharedCloudTrack } from '../types';
 
 const COLLECTION_NAME = 'shared_tracks';
+
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
+}
+
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map((provider) => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || [],
+    },
+    operationType,
+    path,
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 // Clean and sanitize session to ensure 100% valid Firestore JSON without undefined fields
 export function sanitizeSessionForFirestore(session: ActivitySession): ActivitySession {
@@ -143,15 +190,12 @@ export const uploadTrackToCloud = async (
   try {
     await setDoc(docRef, sharedData);
   } catch (firestoreError: any) {
-    console.warn('Firestore direct write failed, caching locally as fallback:', firestoreError);
-    // Even if Firestore network fails, store in localStorage so the user can copy and share the code offline/locally
+    console.warn('Firestore write failed, caching locally as fallback:', firestoreError);
+    // Store in localStorage as backup
     try {
       localStorage.setItem(`cloud_track_${shareCode}`, JSON.stringify(result));
     } catch {}
-    // If it's a genuine permission/network issue, rethrow with friendly message or return result
-    if (firestoreError?.message?.includes('permission') || firestoreError?.message?.includes('PERMISSION_DENIED')) {
-      throw new Error('Adatbázis jogosultsági hiba a feltöltéskor: ' + firestoreError.message);
-    }
+    handleFirestoreError(firestoreError, OperationType.CREATE, `${COLLECTION_NAME}/${shareCode}`);
   }
 
   // Cache locally as backup
@@ -213,8 +257,11 @@ export const loadTrackByCode = async (
       } catch {}
       return track;
     }
-  } catch (err) {
+  } catch (err: any) {
     console.warn('Direct fetch error, trying query fallback:', err);
+    if (err?.code === 'permission-denied') {
+      handleFirestoreError(err, OperationType.GET, `${COLLECTION_NAME}/${cleanCode}`);
+    }
   }
 
   // 3. Fallback: Query by shareCode field
@@ -241,8 +288,11 @@ export const loadTrackByCode = async (
       } catch {}
       return track;
     }
-  } catch (err) {
+  } catch (err: any) {
     console.error('Firestore query failed:', err);
+    if (err?.code === 'permission-denied') {
+      handleFirestoreError(err, OperationType.LIST, COLLECTION_NAME);
+    }
   }
 
   return null;
@@ -258,11 +308,15 @@ export const updateSharedTrackInCloud = async (
   await initAuth().catch(() => null);
   const docRef = doc(db, COLLECTION_NAME, trackId);
   const cleanSession = sanitizeSessionForFirestore(updatedSession);
-  await updateDoc(docRef, {
-    sessionData: cleanSession,
-    title: updatedSession.title,
-    updatedAt: new Date().toISOString(),
-  });
+  try {
+    await updateDoc(docRef, {
+      sessionData: cleanSession,
+      title: updatedSession.title,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `${COLLECTION_NAME}/${trackId}`);
+  }
 };
 
 /**
@@ -274,10 +328,14 @@ export const updateTrackPermissions = async (
 ): Promise<void> => {
   await initAuth().catch(() => null);
   const docRef = doc(db, COLLECTION_NAME, trackId);
-  await updateDoc(docRef, {
-    allowPublicEdit,
-    updatedAt: new Date().toISOString(),
-  });
+  try {
+    await updateDoc(docRef, {
+      allowPublicEdit,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `${COLLECTION_NAME}/${trackId}`);
+  }
 };
 
 /**
@@ -309,8 +367,8 @@ export const subscribeToTrack = (
     },
     (error) => {
       console.error('Real-time sync listener error:', error);
+      handleFirestoreError(error, OperationType.GET, `${COLLECTION_NAME}/${trackId}`);
       if (onError) onError(error);
     }
   );
 };
-
