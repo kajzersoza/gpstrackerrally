@@ -211,6 +211,16 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
 
   const avgSpeed = elapsedSeconds > 0 ? ((totalDistanceKm / (elapsedSeconds / 3600)).toFixed(1)) : '0.0';
 
+  const currentSpeedKmh = useMemo(() => {
+    if (currentLocation?.speed != null && currentLocation.speed >= 0) {
+      return Math.round(currentLocation.speed * 3.6);
+    }
+    if (elapsedSeconds > 0 && totalDistanceKm > 0) {
+      return Math.round(totalDistanceKm / (elapsedSeconds / 3600));
+    }
+    return 0;
+  }, [currentLocation, elapsedSeconds, totalDistanceKm]);
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#f4f7fb]">
       {/* 1. Header (Menu, Title: GPS TRACKER, Quick Status, Settings) */}
@@ -1027,13 +1037,25 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
           </section>
         ) : (
           <section className="flex-shrink-0 grid grid-cols-2 gap-2">
-            <div className="bg-white rounded-2xl px-3.5 py-2 min-h-[58px] shadow-sm border border-slate-100/80 flex flex-col justify-between">
-              <span className="text-xs font-bold text-slate-500 tracking-wide">
-                {displayClock}
-              </span>
-              <span className="text-[20px] font-black text-slate-900 tracking-tight leading-tight font-heading">
-                {formatElapsedTime(elapsedSeconds)}
-              </span>
+            <div className="bg-white rounded-2xl px-3.5 py-2 min-h-[58px] shadow-sm border border-slate-100/80 flex items-center justify-between">
+              <div className="flex flex-col justify-between h-full">
+                <span className="text-xs font-bold text-slate-500 tracking-wide">
+                  {displayClock}
+                </span>
+                <span className="text-[19px] sm:text-[20px] font-black text-slate-900 tracking-tight leading-tight font-heading">
+                  {formatElapsedTime(elapsedSeconds)}
+                </span>
+              </div>
+
+              <div className="flex flex-col items-end justify-between h-full pl-2 border-l border-slate-100/80">
+                <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
+                  Sebesség
+                </span>
+                <span className="text-xs sm:text-sm font-black font-mono text-[#0060e6] leading-tight flex items-baseline gap-0.5">
+                  <span>{currentSpeedKmh}</span>
+                  <span className="text-[10px] font-bold text-slate-500">km/h</span>
+                </span>
+              </div>
             </div>
 
             <button
