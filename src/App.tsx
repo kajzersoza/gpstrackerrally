@@ -405,7 +405,7 @@ export default function App() {
   }, [settings.simulationMode]);
 
   // Perform a Lap / Split - accurately records the exact distance covered and captures split GPS coordinate
-  const handleSplit = useCallback(() => {
+  const handleSplit = useCallback((presetName?: string, presetNotes?: string) => {
     const splitIndex = splitsRef.current.length + 1;
     // Exactly how much distance was covered in this split (no artificial fallback to 1.0)
     const splitDist = Math.max(0, currentSplitDistRef.current);
@@ -427,6 +427,8 @@ export default function App() {
       id: `split-${Date.now()}-${splitIndex}`,
       splitIndex,
       formattedIndex: splitIndex.toString().padStart(2, '0'),
+      name: presetName,
+      notes: presetNotes,
       distanceKm: splitDist,
       formattedDistance: `${splitDist.toFixed(2)} km`,
       timeSec: splitSec,
@@ -935,10 +937,27 @@ export default function App() {
 
           {activeTab === 'maps' && (
             <MapsView
-              coordinates={coordinates}
+              trackingStatus={trackingStatus}
+              elapsedSeconds={elapsedSeconds}
+              totalDistanceKm={totalDistanceKm}
+              startTime={startTime}
               currentLocation={currentLocation}
+              coordinates={coordinates}
+              splits={splits}
+              currentSplitTimeSec={currentSplitTimeSec}
+              currentSplitDistanceKm={currentSplitDistanceKm}
               settings={settings}
+              loadedSession={loadedSession}
+              onUnloadSession={handleUnloadSession}
+              onStart={handleStart}
+              onPause={handlePause}
+              onResume={handleResume}
+              onSplit={handleSplit}
+              onStop={handleStop}
+              onUpdateSplit={handleUpdateSplit}
               onUpdateSettings={handleUpdateSettings}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              onOpenCoordinates={() => setIsCoordinateModalOpen(true)}
             />
           )}
 
