@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Layers,
   Compass,
@@ -19,9 +19,11 @@ import {
   Info,
   Maximize2,
   Sparkles,
+  Plus,
+  Minus,
 } from 'lucide-react';
 import { Coordinate, Split, TrackingStatus, UserSettings, ActivitySession } from '../types';
-import { OsmMap, MapLayerType } from './OsmMap';
+import { OsmMap, OsmMapHandle, MapLayerType } from './OsmMap';
 import { SplitDetailModal } from './SplitDetailModal';
 import {
   formatElapsedTime,
@@ -80,11 +82,28 @@ export const MapsView: React.FC<MapsViewProps> = ({
   onOpenSettings,
   onOpenCoordinates,
 }) => {
+  const mapRef = useRef<OsmMapHandle>(null);
   const [editingSplit, setEditingSplit] = useState<Split | null>(null);
   const [showPresetsBar, setShowPresetsBar] = useState<boolean>(true);
   const [showHudCard, setShowHudCard] = useState<boolean>(true);
   const [showLayerPicker, setShowLayerPicker] = useState<boolean>(false);
   const [showStopConfirm, setShowStopConfirm] = useState<boolean>(false);
+
+  // Live real-time ticking clock (always showing exact current time)
+  const [currentWallTime, setCurrentWallTime] = useState<Date>(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentWallTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const liveClock = useMemo(() => {
+    const hh = currentWallTime.getHours().toString().padStart(2, '0');
+    const mm = currentWallTime.getMinutes().toString().padStart(2, '0');
+    const ss = currentWallTime.getSeconds().toString().padStart(2, '0');
+    return `${hh}:${mm}:${ss}`;
+  }, [currentWallTime]);
 
   // Active coordinates
   const activeLat = currentLocation?.lat ?? (coordinates.length > 0 ? coordinates[coordinates.length - 1].lat : (loadedSession?.coordinates[0]?.lat ?? 37.777528));
@@ -150,16 +169,26 @@ export const MapsView: React.FC<MapsViewProps> = ({
           </span>
         </div>
 
-        {/* Right side: Coordinates button */}
-        <button
-          type="button"
-          onClick={onOpenCoordinates}
-          className="flex items-center gap-1.5 text-xs font-mono font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-xl transition-all border border-slate-200 active:scale-95 cursor-pointer shadow-2xs"
-          title="GPS Koordináták megnyitása"
-        >
-          <Compass className="w-3.5 h-3.5 text-[#0050cb]" />
-          <span>{activeLat.toFixed(4)}°, {activeLng.toFixed(4)}°</span>
-        </button>
+        {/* Right side: Live Clock & Coordinates button */}
+        <div className="flex items-center gap-1.5">
+          {/* Current Live Time */}
+          <div className="flex items-center gap-1 text-xs font-mono font-bold text-[#0050cb] bg-blue-50 px-2.5 py-1 rounded-xl border border-blue-200 shadow-2xs">
+            <Clock className="w-3.5 h-3.5 text-[#0050cb]" />
+            <span>{liveClock}</span>
+          </div>
+
+          {/* Coordinates button */}
+          <button
+            type="button"
+            onClick={onOpenCoordinates}
+            className="flex items-center gap-1.5 text-xs font-mono font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-xl transition-all border border-slate-200 active:scale-95 cursor-pointer shadow-2xs"
+            title="GPS Koordináták megnyitása"
+          >
+            <Compass className="w-3.5 h-3.5 text-[#0050cb]" />
+            <span className="hidden sm:inline">{activeLat.toFixed(4)}°, {activeLng.toFixed(4)}°</span>
+            <span className="sm:hidden">GPS</span>
+          </button>
+        </div>
       </header>
 
       {/* Loaded Session / Reference Track Alert Banner */}
@@ -205,6 +234,7 @@ export const MapsView: React.FC<MapsViewProps> = ({
       {/* Main Full-Height Map Container */}
       <div className="flex-1 w-full h-full relative overflow-hidden">
         <OsmMap
+          ref={mapRef}
           coordinates={coordinates}
           currentLocation={currentLocation}
           splits={splits}
@@ -215,7 +245,7 @@ export const MapsView: React.FC<MapsViewProps> = ({
           isTracking={trackingStatus === 'running'}
           interactive={true}
           showLayerSelector={false}
-          showZoomControls={true}
+          showZoomControls={false}
           onLayerChange={(layer) => onUpdateSettings({ mapLayer: layer })}
           onSelectSplit={(split) => setEditingSplit(split)}
         />
@@ -223,16 +253,31 @@ export const MapsView: React.FC<MapsViewProps> = ({
         {/* Floating Top-Left HUD Pill: Live Metrics during Tracking or Paused */}
         <div className="absolute top-3 left-3 z-10 flex flex-col gap-2 max-w-[calc(100vw-80px)] sm:max-w-xs pointer-events-none">
           {/* Collapsible HUD Card */}
-          <div className="bg-white/95 backdrop-blur-md p-3 rounded-2xl shadow-xl border border-slate-200/90 pointer-events-auto transition-all">
-            <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-slate-100">
+          <div className="bg-white/95 backdrop-blur-md px-3 py-2 sm:p-3 rounded-2xl shadow-xl border border-slate-200/90 pointer-events-auto transition-all">
+            <div
+              className={`flex items-center justify-between gap-3 cursor-pointer select-none ${showHudCard ? 'pb-1.5 border-b border-slate-100' : ''}`}
+              onClick={() => setShowHudCard(!showHudCard)}
+            >
               <div className="flex items-center gap-1.5 text-xs font-black text-slate-700 uppercase tracking-wider">
                 <Gauge className="w-3.5 h-3.5 text-[#0050cb]" />
-                <span>Élő Műszerfal</span>
+                {showHudCard ? (
+                  <span>Élő Műszerfal</span>
+                ) : (
+                  <span className="font-mono font-black text-[#0050cb] text-sm normal-case tracking-normal flex items-baseline gap-1">
+                    <span>{formattedDistance.value}</span>
+                    <span className="text-xs font-bold text-slate-500">{formattedDistance.unitLabel}</span>
+                  </span>
+                )}
               </div>
               <button
                 type="button"
-                onClick={() => setShowHudCard(!showHudCard)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowHudCard(!showHudCard);
+                }}
                 className="p-1 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 cursor-pointer"
+                title={showHudCard ? 'Műszerfal összecsukása' : 'Műszerfal lenyitása'}
+                aria-label={showHudCard ? 'Műszerfal összecsukása' : 'Műszerfal lenyitása'}
               >
                 {showHudCard ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
               </button>
@@ -281,32 +326,72 @@ export const MapsView: React.FC<MapsViewProps> = ({
 
         {/* Floating Right Map Tool Controls */}
         <div className="absolute top-3 right-3 z-10 flex flex-col gap-2 pointer-events-auto">
+          {/* Zoom In & Zoom Out Controls */}
+          <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-slate-200/90 flex flex-col overflow-hidden">
+            <button
+              id="btn-large-map-zoom-in"
+              type="button"
+              onClick={() => mapRef.current?.zoomIn()}
+              className="p-3 text-slate-700 hover:text-[#0050cb] hover:bg-slate-50 active:bg-blue-50 transition-all border-b border-slate-100 cursor-pointer flex items-center justify-center"
+              title="Nagyítás (+)"
+              aria-label="Nagyítás (+)"
+            >
+              <Plus className="w-5 h-5 stroke-[2.5]" />
+            </button>
+            <button
+              id="btn-large-map-zoom-out"
+              type="button"
+              onClick={() => mapRef.current?.zoomOut()}
+              className="p-3 text-slate-700 hover:text-[#0050cb] hover:bg-slate-50 active:bg-blue-50 transition-all cursor-pointer flex items-center justify-center"
+              title="Kicsinyítés (-)"
+              aria-label="Kicsinyítés (-)"
+            >
+              <Minus className="w-5 h-5 stroke-[2.5]" />
+            </button>
+          </div>
+
+          {/* Recenter Button */}
+          <button
+            id="btn-large-map-recenter"
+            type="button"
+            onClick={() => mapRef.current?.recenter()}
+            className="p-3 bg-white/95 backdrop-blur-md hover:bg-white text-slate-700 hover:text-[#0050cb] active:text-[#0050cb] rounded-2xl shadow-xl border border-slate-200/90 active:scale-95 transition-all cursor-pointer flex items-center justify-center"
+            title="Centrálás jelenlegi helyre"
+            aria-label="Centrálás jelenlegi helyre"
+          >
+            <Crosshair className="w-5 h-5" />
+          </button>
+
           {/* Layer Selector Trigger Button */}
           <button
+            id="btn-large-map-layer-selector"
             type="button"
             onClick={() => setShowLayerPicker(!showLayerPicker)}
-            className={`p-2.5 rounded-2xl shadow-lg border transition-all cursor-pointer ${
+            className={`p-3 rounded-2xl shadow-xl border transition-all cursor-pointer flex items-center justify-center ${
               showLayerPicker
                 ? 'bg-[#0050cb] text-white border-blue-600'
-                : 'bg-white/95 text-slate-700 hover:bg-slate-50 border-slate-200'
+                : 'bg-white/95 backdrop-blur-md text-slate-700 hover:bg-slate-50 border-slate-200/90'
             }`}
             title="Térképréteg váltása"
+            aria-label="Térképréteg váltása"
           >
-            <Layers className="w-4 h-4" />
+            <Layers className="w-5 h-5" />
           </button>
 
           {/* Quick Preset Bar Toggle */}
           <button
+            id="btn-large-map-preset-toggle"
             type="button"
             onClick={() => setShowPresetsBar(!showPresetsBar)}
-            className={`p-2.5 rounded-2xl shadow-lg border transition-all cursor-pointer ${
+            className={`p-3 rounded-2xl shadow-xl border transition-all cursor-pointer flex items-center justify-center ${
               showPresetsBar
                 ? 'bg-amber-500 text-white border-amber-600'
-                : 'bg-white/95 text-slate-700 hover:bg-slate-50 border-slate-200'
+                : 'bg-white/95 backdrop-blur-md text-slate-700 hover:bg-slate-50 border-slate-200/90'
             }`}
             title="Gyors itiner sablonok megjelenítése/elrejtése"
+            aria-label="Gyors itiner sablonok megjelenítése/elrejtése"
           >
-            <Tag className="w-4 h-4" />
+            <Tag className="w-5 h-5" />
           </button>
         </div>
 

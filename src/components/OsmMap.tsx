@@ -1,11 +1,18 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import L from 'leaflet';
 import { Crosshair, Layers, Plus, Minus, Check } from 'lucide-react';
 import { Coordinate, Split } from '../types';
 
 export type MapLayerType = 'osm' | 'voyager' | 'positron' | 'cyclosm' | 'satellite';
 
-interface OsmMapProps {
+export interface OsmMapHandle {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  recenter: () => void;
+  getMap: () => L.Map | null;
+}
+
+export interface OsmMapProps {
   coordinates: Coordinate[];
   currentLocation: Coordinate | null;
   splits?: Split[];
@@ -19,12 +26,13 @@ interface OsmMapProps {
   onRecenter?: () => void;
   showLayerSelector?: boolean;
   showZoomControls?: boolean;
+  zoomControlsPosition?: 'top-left' | 'top-right' | 'bottom-right' | 'right' | 'hidden';
   onLayerChange?: (layer: MapLayerType) => void;
   focusedSplitId?: string | null;
   onSelectSplit?: (split: Split) => void;
 }
 
-export const OsmMap: React.FC<OsmMapProps> = ({
+export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
   coordinates,
   currentLocation,
   splits = [],
@@ -38,10 +46,11 @@ export const OsmMap: React.FC<OsmMapProps> = ({
   onRecenter,
   showLayerSelector = true,
   showZoomControls = true,
+  zoomControlsPosition = 'top-left',
   onLayerChange,
   focusedSplitId = null,
   onSelectSplit,
-}) => {
+}, ref) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
@@ -1020,6 +1029,29 @@ export const OsmMap: React.FC<OsmMapProps> = ({
     }
   };
 
+  useImperativeHandle(ref, () => ({
+    zoomIn: () => {
+      if (mapRef.current) {
+        mapRef.current.zoomIn();
+      }
+    },
+    zoomOut: () => {
+      if (mapRef.current) {
+        mapRef.current.zoomOut();
+      }
+    },
+    recenter: () => {
+      if (!mapRef.current) return;
+      const targetPos = currentLocation
+        ? [currentLocation.lat, currentLocation.lng]
+        : coordinates.length > 0
+        ? [coordinates[coordinates.length - 1].lat, coordinates[coordinates.length - 1].lng]
+        : [37.7775, -122.4164];
+      mapRef.current.setView(targetPos as [number, number], 15, { animate: true });
+    },
+    getMap: () => mapRef.current,
+  }), [currentLocation, coordinates]);
+
   const handleZoomIn = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (mapRef.current) {
@@ -1049,6 +1081,15 @@ export const OsmMap: React.FC<OsmMapProps> = ({
     { key: 'cyclosm', name: 'CyclOSM', desc: 'Kerékpár & Terep' },
     { key: 'satellite', name: 'Esri Műhold', desc: 'Műholdkép' },
   ];
+
+  const zoomPosClass =
+    zoomControlsPosition === 'top-right'
+      ? 'top-12 right-2.5'
+      : zoomControlsPosition === 'bottom-right'
+      ? 'bottom-12 right-2.5'
+      : zoomControlsPosition === 'right'
+      ? 'top-1/2 -translate-y-1/2 right-2.5'
+      : 'top-2.5 left-2.5';
 
   return (
     <div className={`relative w-full h-full overflow-hidden ${className}`}>
@@ -1119,9 +1160,9 @@ export const OsmMap: React.FC<OsmMapProps> = ({
         </div>
       )}
 
-      {/* Zoom Controls (Top Left) */}
-      {showZoomControls && (
-        <div className="absolute top-2.5 left-2.5 z-10 flex flex-col bg-white/95 rounded-xl shadow-md border border-slate-200/80 overflow-hidden">
+      {/* Zoom Controls */}
+      {showZoomControls && zoomControlsPosition !== 'hidden' && (
+        <div className={`absolute z-10 flex flex-col bg-white/95 rounded-xl shadow-md border border-slate-200/80 overflow-hidden ${zoomPosClass}`}>
           <button
             id="btn-map-zoom-in"
             type="button"
@@ -1155,5 +1196,7 @@ export const OsmMap: React.FC<OsmMapProps> = ({
       </button>
     </div>
   );
-};
+});
+
+OsmMap.displayName = 'OsmMap';
 

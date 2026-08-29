@@ -119,6 +119,26 @@ export default function App() {
   const handleLoadSessionForTracking = (session: ActivitySession) => {
     setLoadedSession(session);
     setActiveTab('activity');
+
+    // Immediately acquire/refresh real GPS position so metrics and distance to points compute instantly
+    if (typeof window !== 'undefined' && 'geolocation' in navigator && !settings.simulationMode) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const loc: Coordinate = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            altitude: pos.coords.altitude,
+            speed: pos.coords.speed,
+            accuracy: pos.coords.accuracy,
+            timestamp: Date.now(),
+          };
+          setCurrentLocation(loc);
+          lastLocationRef.current = loc;
+        },
+        (err) => console.warn('Instant GPS update on track load warning:', err),
+        { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
+      );
+    }
   };
 
   const handleUnloadSession = () => {
@@ -380,30 +400,6 @@ export default function App() {
     }
   }, [savedSessions]);
 
-  // Request browser GPS on first mount and immediately acquire real GPS coordinates
-  useEffect(() => {
-    if (typeof window !== 'undefined' && 'geolocation' in navigator && !settings.simulationMode) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const loc: Coordinate = {
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-            altitude: pos.coords.altitude,
-            speed: pos.coords.speed,
-            accuracy: pos.coords.accuracy,
-            timestamp: Date.now(),
-          };
-          setCurrentLocation(loc);
-          lastLocationRef.current = loc;
-        },
-        (err) => {
-          console.warn('Geolocation initial query error:', err);
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-      );
-    }
-  }, [settings.simulationMode]);
-
   // Perform a Lap / Split - accurately records the exact distance covered and captures split GPS coordinate
   const handleSplit = useCallback((presetName?: string, presetNotes?: string) => {
     const splitIndex = splitsRef.current.length + 1;
@@ -456,6 +452,107 @@ export default function App() {
     if (settings.hapticsEnabled) triggerHaptic([50, 40, 50]);
   }, [elapsedSeconds, settings.soundEnabled, settings.hapticsEnabled, currentLocation, coordinates]);
 
+  // Continuous Location Service: ALWAYS acquires real-time GPS position for map, distance calculations, and guidance
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('geolocation' in navigator) || settings.simulationMode) {
+      return;
+    }
+
+    const handlePosition = (pos: GeolocationPosition) => {
+      const now = Date.now();
+      const newCoord: Coordinate = {
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        altitude: pos.coords.altitude,
+        speed: pos.coords.speed,
+        accuracy: pos.coords.accuracy,
+        timestamp: now,
+      };
+
+      setCurrentLocation(newCoord);
+
+      // If workout recording is actively running, log coordinates and calculate distance
+      if (trackingStatus === 'running') {
+        const modeConfig = getActivityModeConfig(settings.activityMode);
+        if (lastLocationRef.current) {
+          const timeSinceLastLog = now - lastLogTimestampRef.current;
+          const addedDist = calculateDistance(
+            lastLocationRef.current.lat,
+            lastLocationRef.current.lng,
+            newCoord.lat,
+            newCoord.lng
+          );
+
+          // Dynamic throttle: car logs frequently (every 1s), walking logs every 5s to save battery & avoid jitter
+          if (timeSinceLastLog < modeConfig.intervalMs && addedDist < modeConfig.minDistanceKm * 2) {
+            return;
+          }
+
+          // Track movement if distance >= min distance threshold for mode and realistic GPS speed
+          if (addedDist >= modeConfig.minDistanceKm && addedDist < modeConfig.maxDistanceKm) {
+            lastLogTimestampRef.current = now;
+            setTotalDistanceKm((prev) => +(prev + addedDist).toFixed(3));
+            setCurrentSplitDistanceKm((prev) => {
+              const updated = +(prev + addedDist).toFixed(3);
+              // Auto Split check
+              if (
+                settings.autoSplitDistanceKm > 0 &&
+                updated >= settings.autoSplitDistanceKm
+              ) {
+                setTimeout(handleSplit, 0);
+              }
+              return updated;
+            });
+            setCoordinates((prev) => [...prev, newCoord]);
+            lastLocationRef.current = newCoord;
+          }
+        } else {
+          lastLogTimestampRef.current = now;
+          lastLocationRef.current = newCoord;
+          setCoordinates([newCoord]);
+        }
+      } else {
+        lastLocationRef.current = newCoord;
+      }
+    };
+
+    const handleError = (err: GeolocationPositionError) => {
+      console.warn('Continuous GPS watch warning:', err.message);
+    };
+
+    const modeConfig = getActivityModeConfig(settings.activityMode);
+
+    // Immediate initial fix
+    navigator.geolocation.getCurrentPosition(handlePosition, handleError, {
+      enableHighAccuracy: settings.highAccuracy,
+      timeout: 10000,
+      maximumAge: 0,
+    });
+
+    // Continuous watch
+    const watchId = navigator.geolocation.watchPosition(handlePosition, handleError, {
+      enableHighAccuracy: settings.highAccuracy,
+      maximumAge: 0,
+      timeout: modeConfig.gpsTimeout || 10000,
+    });
+
+    watchIdRef.current = watchId;
+
+    return () => {
+      navigator.geolocation.clearWatch(watchId);
+      if (watchIdRef.current === watchId) {
+        watchIdRef.current = null;
+      }
+    };
+  }, [
+    settings.simulationMode,
+    settings.highAccuracy,
+    settings.activityMode,
+    trackingStatus,
+    handleSplit,
+    getActivityModeConfig,
+  ]);
+
   // Start Tracking
   const handleStart = () => {
     // If starting fresh from demo or idle
@@ -498,86 +595,7 @@ export default function App() {
     // GPS Tracking or Simulation
     if (settings.simulationMode) {
       startSimulation();
-    } else {
-      startRealGeolocation();
     }
-  };
-
-  // Real Geolocation with activity-mode aware interval & filtering
-  const startRealGeolocation = () => {
-    if (typeof window === 'undefined' || !('geolocation' in navigator)) {
-      startSimulation();
-      return;
-    }
-
-    if (watchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-    }
-
-    const modeConfig = getActivityModeConfig(settings.activityMode);
-
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      (pos) => {
-        const now = Date.now();
-        const newCoord: Coordinate = {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          altitude: pos.coords.altitude,
-          speed: pos.coords.speed,
-          accuracy: pos.coords.accuracy,
-          timestamp: now,
-        };
-
-        setCurrentLocation(newCoord);
-
-        if (lastLocationRef.current) {
-          const timeSinceLastLog = now - lastLogTimestampRef.current;
-          const addedDist = calculateDistance(
-            lastLocationRef.current.lat,
-            lastLocationRef.current.lng,
-            newCoord.lat,
-            newCoord.lng
-          );
-
-          // Dynamic throttle: car logs frequently (every 1s), walking logs every 5s to save battery & avoid jitter
-          if (timeSinceLastLog < modeConfig.intervalMs && addedDist < modeConfig.minDistanceKm * 2) {
-            return;
-          }
-
-          // Track movement if distance >= min distance threshold for mode and realistic GPS speed
-          if (addedDist >= modeConfig.minDistanceKm && addedDist < modeConfig.maxDistanceKm) {
-            lastLogTimestampRef.current = now;
-            setTotalDistanceKm((prev) => +(prev + addedDist).toFixed(3));
-            setCurrentSplitDistanceKm((prev) => {
-              const updated = +(prev + addedDist).toFixed(3);
-              // Auto Split check
-              if (
-                settings.autoSplitDistanceKm > 0 &&
-                updated >= settings.autoSplitDistanceKm
-              ) {
-                setTimeout(handleSplit, 0);
-              }
-              return updated;
-            });
-            setCoordinates((prev) => [...prev, newCoord]);
-            lastLocationRef.current = newCoord;
-          }
-        } else {
-          lastLogTimestampRef.current = now;
-          lastLocationRef.current = newCoord;
-          setCoordinates([newCoord]);
-        }
-      },
-      (err) => {
-        console.warn('Geolocation watch error:', err);
-        startSimulation();
-      },
-      {
-        enableHighAccuracy: settings.highAccuracy,
-        maximumAge: 0,
-        timeout: modeConfig.gpsTimeout,
-      }
-    );
   };
 
   // GPS Simulation (for indoor testing or demo)
@@ -635,10 +653,6 @@ export default function App() {
     if (workerRef.current) workerRef.current.postMessage('stop');
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     if (simulationIntervalRef.current) clearInterval(simulationIntervalRef.current);
-    if (watchIdRef.current !== null && typeof navigator !== 'undefined' && navigator.geolocation) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-      watchIdRef.current = null;
-    }
     if (settings.soundEnabled) playBeep('click');
   };
 
@@ -656,10 +670,6 @@ export default function App() {
     if (workerRef.current) workerRef.current.postMessage('stop');
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     if (simulationIntervalRef.current) clearInterval(simulationIntervalRef.current);
-    if (watchIdRef.current !== null && typeof navigator !== 'undefined' && navigator.geolocation) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-      watchIdRef.current = null;
-    }
 
     setTrackingStatus('idle');
 

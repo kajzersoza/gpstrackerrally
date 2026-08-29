@@ -115,13 +115,21 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
   const activeLng = currentLocation?.lng ?? (coordinates.length > 0 ? coordinates[coordinates.length - 1].lng : (loadedSession?.coordinates[0]?.lng ?? -122.416389));
   const dms = formatDMS(activeLat, activeLng);
 
-  // Start clock display (e.g. 14:30 or current time)
+  // Live real-time clock (always showing exact current time)
+  const [currentWallTime, setCurrentWallTime] = useState<Date>(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentWallTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const displayClock = useMemo(() => {
-    const timeToUse = startTime ? new Date(startTime) : new Date();
-    const hh = timeToUse.getHours().toString().padStart(2, '0');
-    const mm = timeToUse.getMinutes().toString().padStart(2, '0');
-    return `${hh}:${mm}`;
-  }, [startTime]);
+    const hh = currentWallTime.getHours().toString().padStart(2, '0');
+    const mm = currentWallTime.getMinutes().toString().padStart(2, '0');
+    const ss = currentWallTime.getSeconds().toString().padStart(2, '0');
+    return `${hh}:${mm}:${ss}`;
+  }, [currentWallTime]);
 
   // Display distance formatted according to selected unit (km, m, mi)
   const formattedDistanceObj = formatDistanceByUnit(totalDistanceKm, settings.unit);
