@@ -250,7 +250,7 @@ export const MapsView: React.FC<MapsViewProps> = ({
           onSelectSplit={(split) => setEditingSplit(split)}
         />
 
-        {/* Floating Top-Left HUD Pill: Live Metrics during Tracking or Paused */}
+        {/* Floating Top-Left HUD Pill: Live Metrics or Next Checkpoint during Tracking / Route Following */}
         <div className="absolute top-3 left-3 z-10 flex flex-col gap-2 max-w-[calc(100vw-80px)] sm:max-w-xs pointer-events-none">
           {/* Collapsible HUD Card */}
           <div className="bg-white/95 backdrop-blur-md px-3 py-2 sm:p-3 rounded-2xl shadow-xl border border-slate-200/90 pointer-events-auto transition-all">
@@ -258,10 +258,24 @@ export const MapsView: React.FC<MapsViewProps> = ({
               className={`flex items-center justify-between gap-3 cursor-pointer select-none ${showHudCard ? 'pb-1.5 border-b border-slate-100' : ''}`}
               onClick={() => setShowHudCard(!showHudCard)}
             >
-              <div className="flex items-center gap-1.5 text-xs font-black text-slate-700 uppercase tracking-wider">
-                <Gauge className="w-3.5 h-3.5 text-[#0050cb]" />
+              <div className="flex items-center gap-1.5 text-xs font-black text-slate-700 uppercase tracking-wider overflow-hidden">
+                {loadedSession ? (
+                  <Target className="w-3.5 h-3.5 text-purple-600 flex-shrink-0" />
+                ) : (
+                  <Gauge className="w-3.5 h-3.5 text-[#0050cb] flex-shrink-0" />
+                )}
+
                 {showHudCard ? (
-                  <span>Élő Műszerfal</span>
+                  <span>{loadedSession ? 'Következő pont' : 'Élő Műszerfal'}</span>
+                ) : loadedSession && referenceMetrics?.nextSplit ? (
+                  <div className="flex items-center gap-1.5 overflow-hidden">
+                    <span className="text-[11px] font-bold text-slate-600 truncate max-w-[85px] sm:max-w-[120px]">
+                      {referenceMetrics.nextSplit.name}:
+                    </span>
+                    <span className="font-mono font-black text-purple-700 text-sm normal-case tracking-normal">
+                      {referenceMetrics.nextSplit.formattedRelative}
+                    </span>
+                  </div>
                 ) : (
                   <span className="font-mono font-black text-[#0050cb] text-sm normal-case tracking-normal flex items-baseline gap-1">
                     <span>{formattedDistance.value}</span>
@@ -275,7 +289,7 @@ export const MapsView: React.FC<MapsViewProps> = ({
                   e.stopPropagation();
                   setShowHudCard(!showHudCard);
                 }}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 cursor-pointer"
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 cursor-pointer flex-shrink-0"
                 title={showHudCard ? 'Műszerfal összecsukása' : 'Műszerfal lenyitása'}
                 aria-label={showHudCard ? 'Műszerfal összecsukása' : 'Műszerfal lenyitása'}
               >
@@ -284,42 +298,111 @@ export const MapsView: React.FC<MapsViewProps> = ({
             </div>
 
             {showHudCard && (
-              <div className="mt-2 space-y-2">
-                {/* Time and Distance Primary Metrics */}
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Össz. Idő</div>
-                    <div className="text-base font-black font-mono text-slate-800 leading-tight mt-0.5">
-                      {formatElapsedTime(elapsedSeconds)}
+              <>
+                {loadedSession && referenceMetrics?.nextSplit ? (
+                  <div className="mt-2 space-y-2">
+                    {/* Next Checkpoint Highlight Box */}
+                    <div className="bg-gradient-to-br from-purple-50 to-indigo-50/80 p-2.5 rounded-xl border border-purple-200/80 shadow-2xs">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-purple-600 uppercase tracking-wider">
+                        <span className="flex items-center gap-1">
+                          <Target className="w-3 h-3 text-purple-600" />
+                          <span>Következő pont</span>
+                        </span>
+                        <span className="px-1.5 py-0.5 bg-purple-100/90 text-purple-800 rounded font-mono text-[9.5px]">
+                          {referenceMetrics.nextSplit.index} / {referenceMetrics.nextSplit.total}
+                        </span>
+                      </div>
+
+                      <div className="text-xs font-black text-slate-800 truncate mt-0.5" title={referenceMetrics.nextSplit.name}>
+                        {referenceMetrics.nextSplit.name}
+                      </div>
+
+                      <div className="flex items-baseline justify-between mt-1">
+                        <div className="text-xl font-black font-mono text-purple-700 leading-tight">
+                          {referenceMetrics.nextSplit.formattedRelative}
+                        </div>
+                        <div className="flex items-center gap-1 text-[11px] font-bold text-slate-600 bg-white/80 px-1.5 py-0.5 rounded-md border border-purple-100">
+                          <Compass className="w-3 h-3 text-purple-600" />
+                          <span>{referenceMetrics.nextSplit.bearingCompass}</span>
+                          <span className="text-[10px] font-mono text-slate-400">({Math.round(referenceMetrics.nextSplit.bearingDeg)}°)</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Route Context: Distance to Finish & From Start */}
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase block">Célig táv:</span>
+                        <span className="font-mono font-black text-indigo-700 text-sm leading-tight block mt-0.5">
+                          {referenceMetrics.formattedDistanceToEnd}
+                        </span>
+                      </div>
+                      <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase block">Starttól:</span>
+                        <span className="font-mono font-bold text-slate-700 text-sm leading-tight block mt-0.5">
+                          {referenceMetrics.formattedDistanceFromStart}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Route Corridor Status & Speed (if tracking) */}
+                    <div className="pt-1.5 border-t border-slate-100 text-[10.5px] font-mono text-slate-600 flex items-center justify-between">
+                      <span className="flex items-center gap-1">
+                        <span className={`w-2 h-2 rounded-full ${referenceMetrics.isOnTrack ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                        <span className="font-sans font-bold text-[10px]">
+                          {referenceMetrics.isOnTrack ? 'Útvonalon' : `Eltérés: ±${referenceMetrics.crossTrackDistanceMeters}m`}
+                        </span>
+                      </span>
+                      {trackingStatus === 'running' ? (
+                        <span className="font-bold text-slate-700">
+                          {currentSpeedKmh} km/h • {formatElapsedTime(elapsedSeconds)}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 font-sans text-[10px]">
+                          {loadedSession.totalDistanceKm.toFixed(1)} km össztáv
+                        </span>
+                      )}
                     </div>
                   </div>
+                ) : (
+                  <div className="mt-2 space-y-2">
+                    {/* Time and Distance Primary Metrics */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase">Össz. Idő</div>
+                        <div className="text-base font-black font-mono text-slate-800 leading-tight mt-0.5">
+                          {formatElapsedTime(elapsedSeconds)}
+                        </div>
+                      </div>
 
-                  <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Távolság</div>
-                    <div className="text-base font-black font-mono text-[#0050cb] leading-tight mt-0.5">
-                      {formattedDistance.value} <span className="text-xs font-bold text-slate-500">{formattedDistance.unitLabel}</span>
+                      <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
+                        <div className="text-[10px] font-bold text-slate-400 uppercase">Távolság</div>
+                        <div className="text-base font-black font-mono text-[#0050cb] leading-tight mt-0.5">
+                          {formattedDistance.value} <span className="text-xs font-bold text-slate-500">{formattedDistance.unitLabel}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Speed & Current Split Metrics */}
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 text-xs">
+                      <div>
+                        <span className="text-[10px] text-slate-400 font-bold block">Sebesség:</span>
+                        <span className="font-mono font-black text-slate-700">{currentSpeedKmh} km/h</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 font-bold block">Akt. szakasz:</span>
+                        <span className="font-mono font-bold text-slate-700">{formattedSplitDist.value} {formattedSplitDist.unitLabel}</span>
+                      </div>
+                    </div>
+
+                    {/* GPS Coordinates preview */}
+                    <div className="pt-1.5 border-t border-slate-100 text-[10px] font-mono text-slate-500 flex items-center justify-between">
+                      <span>Pontok: <b>{coordinates.length}</b></span>
+                      <span>Splitek: <b>{splits.length}</b></span>
                     </div>
                   </div>
-                </div>
-
-                {/* Speed & Current Split Metrics */}
-                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 text-xs">
-                  <div>
-                    <span className="text-[10px] text-slate-400 font-bold block">Sebesség:</span>
-                    <span className="font-mono font-black text-slate-700">{currentSpeedKmh} km/h</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 font-bold block">Akt. szakasz:</span>
-                    <span className="font-mono font-bold text-slate-700">{formattedSplitDist.value} {formattedSplitDist.unitLabel}</span>
-                  </div>
-                </div>
-
-                {/* GPS Coordinates preview */}
-                <div className="pt-1.5 border-t border-slate-100 text-[10px] font-mono text-slate-500 flex items-center justify-between">
-                  <span>Pontok: <b>{coordinates.length}</b></span>
-                  <span>Splitek: <b>{splits.length}</b></span>
-                </div>
-              </div>
+                )}
+              </>
             )}
           </div>
         </div>

@@ -737,18 +737,32 @@ export function calculateReferenceMetrics(
     };
   });
 
-  // Find the split that the user is currently closest to (amelyik ponthoz a legközelebb vagyunk)
-  let activeSplitIndex = 0;
-  let minSplitDistance = Infinity;
+  // Find the NEXT upcoming split along the track path in sequential forward order
+  // "mindegy melyikhez vagyok közelebb a következőt mutassa"
+  let upcomingIndex = -1;
 
-  splitsProgress.forEach((sp, idx) => {
-    // Check both along-track distance and direct distance to find the genuinely nearest point
-    const effectiveDistance = Math.min(sp.absDistanceMeters, sp.directDistanceMeters);
-    if (effectiveDistance < minSplitDistance) {
-      minSplitDistance = effectiveDistance;
-      activeSplitIndex = idx;
+  for (let i = 0; i < splitsProgress.length; i++) {
+    const sp = splitsProgress[i];
+    const isStartPoint = sp.split.id.startsWith('start') || sp.split.splitIndex === 0 || sp.split.formattedIndex === 'START';
+
+    // If it's the START point and user has already started progressing along the track (> 20 meters), advance to the next split
+    if (isStartPoint && (sp.isPassed || userTrackDistKm > 0.020)) {
+      continue;
     }
-  });
+
+    // The first point along the route that hasn't been passed yet is the NEXT upcoming checkpoint
+    if (!sp.isPassed) {
+      upcomingIndex = i;
+      break;
+    }
+  }
+
+  // If all checkpoints have been passed, target the last point (CÉL / STOP)
+  if (upcomingIndex === -1) {
+    upcomingIndex = Math.max(0, splitsProgress.length - 1);
+  }
+
+  const activeSplitIndex = Math.max(0, upcomingIndex);
 
   const activeSp = splitsProgress[activeSplitIndex];
   let nextSplitObj: ReferenceTrackMetrics['nextSplit'] = null;

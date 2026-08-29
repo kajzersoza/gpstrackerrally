@@ -65,6 +65,8 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
   const referenceMarkersGroupRef = useRef<L.LayerGroup | null>(null);
   const splitMarkersMapRef = useRef<Map<string, L.Marker>>(new Map());
   const hasInitialCenteredRef = useRef<boolean>(false);
+  const lastFittedTrackKeyRef = useRef<string | null>(null);
+  const userInteractedRef = useRef<boolean>(false);
   const [showLayersMenu, setShowLayersMenu] = useState(false);
   const [internalLayer, setInternalLayer] = useState<MapLayerType>(mapLayer);
 
@@ -188,6 +190,14 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
     polylineRef.current = polyline;
 
     mapRef.current = map;
+
+    // Track user interactions (zooming / dragging) so we don't clobber chosen zoom
+    map.on('zoomstart', () => {
+      userInteractedRef.current = true;
+    });
+    map.on('dragstart', () => {
+      userInteractedRef.current = true;
+    });
 
     // Handle container resize
     const resizeObserver = new ResizeObserver(() => {
@@ -509,8 +519,14 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
         });
       }
 
-      // If not tracking, fit map bounds to reference track or full session track
-      if (!isTracking && mapRef.current) {
+      // Calculate a stable fingerprint of the loaded reference track
+      const trackFingerprint =
+        referenceCoordinates.length > 0
+          ? `${referenceTitle || ''}_${referenceCoordinates.length}_${referenceCoordinates[0]?.lat?.toFixed(5)}_${referenceCoordinates[referenceCoordinates.length - 1]?.lat?.toFixed(5)}`
+          : '';
+
+      // Only fit map bounds ONCE when a new reference track is loaded, preserving subsequent user zoom levels
+      if (trackFingerprint && trackFingerprint !== lastFittedTrackKeyRef.current && mapRef.current) {
         const allPoints: [number, number][] = [
           ...refLatLngs,
           ...coordinates.map((c) => [c.lat, c.lng] as [number, number]),
@@ -520,14 +536,18 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
             const bounds = L.latLngBounds(allPoints);
             if (bounds.isValid()) {
               mapRef.current.fitBounds(bounds, { padding: [35, 35], maxZoom: 16 });
+              lastFittedTrackKeyRef.current = trackFingerprint;
+              userInteractedRef.current = false;
             }
           } catch {
             // Ignore fitBounds error
           }
         }
+      } else if (!trackFingerprint) {
+        lastFittedTrackKeyRef.current = null;
       }
     }
-  }, [referenceCoordinates, referenceSplits, coordinates, isTracking, onSelectSplit]);
+  }, [referenceCoordinates, referenceSplits, coordinates, isTracking, onSelectSplit, referenceTitle]);
 
   // Update Polyline and Markers
   useEffect(() => {
@@ -768,11 +788,11 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
         currentMarkerRef.current.setIcon(customIcon);
       }
 
-      // If active tracking, smoothly center map on current position so the growing line is followed
+      // If active tracking, smoothly center map on current position so the growing line is followed (panTo preserves user zoom level)
       if (isTracking && mapRef.current) {
-        mapRef.current.panTo(activeLatLng, { animate: true, duration: 0.4 });
-      } else if (mapRef.current && !hasInitialCenteredRef.current && currentLocation) {
-        // Automatically jump to current GPS position on startup
+        mapRef.current.panTo(activeLatLng, { animate: true, duration: 0.3 });
+      } else if (mapRef.current && !hasInitialCenteredRef.current && !lastFittedTrackKeyRef.current && currentLocation) {
+        // Automatically jump to current GPS position on startup only if no track is loaded
         mapRef.current.setView(activeLatLng, 15, { animate: true });
         hasInitialCenteredRef.current = true;
       }
@@ -1016,13 +1036,23 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
     e.stopPropagation();
     if (!mapRef.current) return;
 
-    const targetPos = currentLocation
-      ? [currentLocation.lat, currentLocation.lng]
-      : coordinates.length > 0
-      ? [coordinates[coordinates.length - 1].lat, coordinates[coordinates.length - 1].lng]
-      : [37.7775, -122.4164];
+    userInteractedRef.current = false;
+    const currentZoom = mapRef.current.getZoom();
 
-    mapRef.current.setView(targetPos as [number, number], 15, { animate: true });
+    if (currentLocation) {
+      const zoomToUse = Math.max(currentZoom, 15);
+      mapRef.current.setView([currentLocation.lat, currentLocation.lng], zoomToUse, { animate: true });
+    } else if (referenceCoordinates.length > 0) {
+      const bounds = L.latLngBounds(referenceCoordinates.map((c) => [c.lat, c.lng]));
+      if (bounds.isValid()) {
+        mapRef.current.fitBounds(bounds, { padding: [35, 35], maxZoom: 16 });
+      }
+    } else if (coordinates.length > 0) {
+      const lastCoord = coordinates[coordinates.length - 1];
+      mapRef.current.setView([lastCoord.lat, lastCoord.lng], Math.max(currentZoom, 15), { animate: true });
+    } else {
+      mapRef.current.setView([37.7775, -122.4164], 15, { animate: true });
+    }
 
     if (onRecenter) {
       onRecenter();
@@ -1032,25 +1062,34 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
   useImperativeHandle(ref, () => ({
     zoomIn: () => {
       if (mapRef.current) {
+        userInteractedRef.current = true;
         mapRef.current.zoomIn();
       }
     },
     zoomOut: () => {
       if (mapRef.current) {
+        userInteractedRef.current = true;
         mapRef.current.zoomOut();
       }
     },
     recenter: () => {
       if (!mapRef.current) return;
-      const targetPos = currentLocation
-        ? [currentLocation.lat, currentLocation.lng]
-        : coordinates.length > 0
-        ? [coordinates[coordinates.length - 1].lat, coordinates[coordinates.length - 1].lng]
-        : [37.7775, -122.4164];
-      mapRef.current.setView(targetPos as [number, number], 15, { animate: true });
+      userInteractedRef.current = false;
+      const currentZoom = mapRef.current.getZoom();
+      if (currentLocation) {
+        mapRef.current.setView([currentLocation.lat, currentLocation.lng], Math.max(currentZoom, 15), { animate: true });
+      } else if (referenceCoordinates.length > 0) {
+        const bounds = L.latLngBounds(referenceCoordinates.map((c) => [c.lat, c.lng]));
+        if (bounds.isValid()) {
+          mapRef.current.fitBounds(bounds, { padding: [35, 35], maxZoom: 16 });
+        }
+      } else if (coordinates.length > 0) {
+        const lastCoord = coordinates[coordinates.length - 1];
+        mapRef.current.setView([lastCoord.lat, lastCoord.lng], Math.max(currentZoom, 15), { animate: true });
+      }
     },
     getMap: () => mapRef.current,
-  }), [currentLocation, coordinates]);
+  }), [currentLocation, coordinates, referenceCoordinates]);
 
   const handleZoomIn = (e: React.MouseEvent) => {
     e.stopPropagation();
