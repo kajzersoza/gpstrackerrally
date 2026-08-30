@@ -115,6 +115,23 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
   const activeLng = currentLocation?.lng ?? (coordinates.length > 0 ? coordinates[coordinates.length - 1].lng : (loadedSession?.coordinates[0]?.lng ?? -122.416389));
   const dms = formatDMS(activeLat, activeLng);
 
+  // Track screen size to mount only one OsmMap at a time
+  const [isDesktop, setIsDesktop] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 768;
+    }
+    return true;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleResize = () => {
+      setIsDesktop(window.innerWidth >= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   // Live real-time clock (always showing exact current time)
   const [currentWallTime, setCurrentWallTime] = useState<Date>(() => new Date());
   useEffect(() => {
@@ -904,21 +921,23 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
         {/* JOBB OLDALT (RIGHT): Térkép                                   */}
         {/* ------------------------------------------------------------- */}
         <section className="flex-1 min-w-[320px] h-full flex flex-col min-h-0 rounded-2xl overflow-hidden shadow-sm border border-slate-200/80 relative bg-slate-100">
-          <OsmMap
-            coordinates={coordinates}
-            currentLocation={currentLocation}
-            splits={splits}
-            referenceCoordinates={loadedSession?.coordinates}
-            referenceSplits={loadedSessionSplits}
-            referenceTitle={loadedSession?.title}
-            mapLayer={settings.mapLayer}
-            isTracking={trackingStatus === 'running'}
-            showLayerSelector={true}
-            showZoomControls={true}
-            onLayerChange={onLayerChange}
-            focusedSplitId={focusedSplitId}
-            onSelectSplit={(split) => setFocusedSplitId(split.id)}
-          />
+          {isDesktop && (
+            <OsmMap
+              coordinates={coordinates}
+              currentLocation={currentLocation}
+              splits={splits}
+              referenceCoordinates={loadedSession?.coordinates}
+              referenceSplits={loadedSessionSplits}
+              referenceTitle={loadedSession?.title}
+              mapLayer={settings.mapLayer}
+              isTracking={trackingStatus === 'running'}
+              showLayerSelector={true}
+              showZoomControls={true}
+              onLayerChange={onLayerChange}
+              focusedSplitId={focusedSplitId}
+              onSelectSplit={(split) => setFocusedSplitId(split.id)}
+            />
+          )}
 
           {/* Floating map info badge */}
           <div className="absolute top-3 left-14 z-10 bg-white/90 backdrop-blur-xs px-2.5 py-1 rounded-xl shadow-xs border border-slate-200/80 flex items-center gap-2 text-[11px] font-semibold text-slate-700 pointer-events-none">
@@ -964,21 +983,23 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
 
         {/* 1. Mobile OSM Map */}
         <section className="flex-shrink-0 w-full h-[145px] sm:h-[175px] rounded-2xl overflow-hidden shadow-sm border border-slate-200/70 relative">
-          <OsmMap
-            coordinates={coordinates}
-            currentLocation={currentLocation}
-            splits={splits}
-            referenceCoordinates={loadedSession?.coordinates}
-            referenceSplits={loadedSessionSplits}
-            referenceTitle={loadedSession?.title}
-            mapLayer={settings.mapLayer}
-            isTracking={trackingStatus === 'running'}
-            showLayerSelector={true}
-            showZoomControls={true}
-            onLayerChange={onLayerChange}
-            focusedSplitId={focusedSplitId}
-            onSelectSplit={(split) => setFocusedSplitId(split.id)}
-          />
+          {!isDesktop && (
+            <OsmMap
+              coordinates={coordinates}
+              currentLocation={currentLocation}
+              splits={splits}
+              referenceCoordinates={loadedSession?.coordinates}
+              referenceSplits={loadedSessionSplits}
+              referenceTitle={loadedSession?.title}
+              mapLayer={settings.mapLayer}
+              isTracking={trackingStatus === 'running'}
+              showLayerSelector={true}
+              showZoomControls={true}
+              onLayerChange={onLayerChange}
+              focusedSplitId={focusedSplitId}
+              onSelectSplit={(split) => setFocusedSplitId(split.id)}
+            />
+          )}
         </section>
 
         {/* 2. Mobile Distance Display Card */}

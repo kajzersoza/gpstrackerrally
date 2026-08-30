@@ -32,6 +32,11 @@ export interface OsmMapProps {
   onSelectSplit?: (split: Split) => void;
 }
 
+// Persist last fitted track key, user zoom level, and center across tab switches and component mounts
+let globalLastFittedTrackKey: string | null = null;
+let globalLastUserZoom: number | null = null;
+let globalLastUserCenter: [number, number] | null = null;
+
 export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
   coordinates,
   currentLocation,
@@ -65,8 +70,9 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
   const referenceMarkersGroupRef = useRef<L.LayerGroup | null>(null);
   const splitMarkersMapRef = useRef<Map<string, L.Marker>>(new Map());
   const hasInitialCenteredRef = useRef<boolean>(false);
-  const lastFittedTrackKeyRef = useRef<string | null>(null);
   const userInteractedRef = useRef<boolean>(false);
+  const isUserTouchingRef = useRef<boolean>(false);
+  const lastFocusedSplitIdRef = useRef<string | null>(null);
   const [showLayersMenu, setShowLayersMenu] = useState(false);
   const [internalLayer, setInternalLayer] = useState<MapLayerType>(mapLayer);
 
@@ -117,21 +123,31 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
     if (!mapContainerRef.current) return;
 
     if (mapRef.current) {
+      try {
+        globalLastUserZoom = mapRef.current.getZoom();
+        globalLastUserCenter = [mapRef.current.getCenter().lat, mapRef.current.getCenter().lng];
+      } catch {
+        // Ignore
+      }
       mapRef.current.remove();
       mapRef.current = null;
     }
 
-    const defaultCenter: [number, number] = currentLocation
+    const defaultCenter: [number, number] = globalLastUserCenter
+      ? globalLastUserCenter
+      : currentLocation
       ? [currentLocation.lat, currentLocation.lng]
-      : coordinates.length > 0
-      ? [coordinates[coordinates.length - 1].lat, coordinates[coordinates.length - 1].lng]
       : referenceCoordinates.length > 0
       ? [referenceCoordinates[0].lat, referenceCoordinates[0].lng]
+      : coordinates.length > 0
+      ? [coordinates[coordinates.length - 1].lat, coordinates[coordinates.length - 1].lng]
       : [37.7775, -122.4164]; // San Francisco default
+
+    const defaultZoom = globalLastUserZoom !== null ? globalLastUserZoom : 15;
 
     const map = L.map(mapContainerRef.current, {
       center: defaultCenter,
-      zoom: 14,
+      zoom: defaultZoom,
       zoomControl: false,
       attributionControl: true,
       dragging: interactive,
@@ -191,12 +207,34 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
 
     mapRef.current = map;
 
-    // Track user interactions (zooming / dragging) so we don't clobber chosen zoom
+    // Track user interactions (zooming / dragging / touch gestures) so we don't clobber chosen zoom
     map.on('zoomstart', () => {
       userInteractedRef.current = true;
     });
+    map.on('zoomend', () => {
+      if (mapRef.current) {
+        globalLastUserZoom = mapRef.current.getZoom();
+        globalLastUserCenter = [mapRef.current.getCenter().lat, mapRef.current.getCenter().lng];
+        userInteractedRef.current = true;
+      }
+    });
     map.on('dragstart', () => {
       userInteractedRef.current = true;
+    });
+    map.on('dragend', () => {
+      if (mapRef.current) {
+        globalLastUserCenter = [mapRef.current.getCenter().lat, mapRef.current.getCenter().lng];
+        userInteractedRef.current = true;
+      }
+    });
+    map.on('touchstart', () => {
+      isUserTouchingRef.current = true;
+      userInteractedRef.current = true;
+    });
+    map.on('touchend', () => {
+      setTimeout(() => {
+        isUserTouchingRef.current = false;
+      }, 400);
     });
 
     // Handle container resize
@@ -210,6 +248,12 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
     return () => {
       resizeObserver.disconnect();
       if (mapRef.current) {
+        try {
+          globalLastUserZoom = mapRef.current.getZoom();
+          globalLastUserCenter = [mapRef.current.getCenter().lat, mapRef.current.getCenter().lng];
+        } catch {
+          // Ignore
+        }
         mapRef.current.remove();
         mapRef.current = null;
       }
@@ -525,8 +569,8 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
           ? `${referenceTitle || ''}_${referenceCoordinates.length}_${referenceCoordinates[0]?.lat?.toFixed(5)}_${referenceCoordinates[referenceCoordinates.length - 1]?.lat?.toFixed(5)}`
           : '';
 
-      // Only fit map bounds ONCE when a new reference track is loaded, preserving subsequent user zoom levels
-      if (trackFingerprint && trackFingerprint !== lastFittedTrackKeyRef.current && mapRef.current) {
+      // Only fit map bounds ONCE when a new reference track is loaded for the first time in the app session
+      if (trackFingerprint && trackFingerprint !== globalLastFittedTrackKey && mapRef.current) {
         const allPoints: [number, number][] = [
           ...refLatLngs,
           ...coordinates.map((c) => [c.lat, c.lng] as [number, number]),
@@ -536,7 +580,9 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
             const bounds = L.latLngBounds(allPoints);
             if (bounds.isValid()) {
               mapRef.current.fitBounds(bounds, { padding: [35, 35], maxZoom: 16 });
-              lastFittedTrackKeyRef.current = trackFingerprint;
+              globalLastFittedTrackKey = trackFingerprint;
+              globalLastUserZoom = mapRef.current.getZoom();
+              globalLastUserCenter = [mapRef.current.getCenter().lat, mapRef.current.getCenter().lng];
               userInteractedRef.current = false;
             }
           } catch {
@@ -544,7 +590,7 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
           }
         }
       } else if (!trackFingerprint) {
-        lastFittedTrackKeyRef.current = null;
+        globalLastFittedTrackKey = null;
       }
     }
   }, [referenceCoordinates, referenceSplits, coordinates, isTracking, onSelectSplit, referenceTitle]);
@@ -788,13 +834,22 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
         currentMarkerRef.current.setIcon(customIcon);
       }
 
-      // If active tracking, smoothly center map on current position so the growing line is followed (panTo preserves user zoom level)
-      if (isTracking && mapRef.current) {
+      // If active tracking, smoothly center map on current position so the growing line is followed (panTo strictly preserves user zoom level)
+      if (isTracking && mapRef.current && !isUserTouchingRef.current) {
         mapRef.current.panTo(activeLatLng, { animate: true, duration: 0.3 });
-      } else if (mapRef.current && !hasInitialCenteredRef.current && !lastFittedTrackKeyRef.current && currentLocation) {
-        // Automatically jump to current GPS position on startup only if no track is loaded
+        globalLastUserCenter = activeLatLng;
+      } else if (
+        mapRef.current &&
+        !hasInitialCenteredRef.current &&
+        !globalLastFittedTrackKey &&
+        !globalLastUserCenter &&
+        currentLocation
+      ) {
+        // Automatically jump to current GPS position on initial startup only if no track is loaded
         mapRef.current.setView(activeLatLng, 15, { animate: true });
         hasInitialCenteredRef.current = true;
+        globalLastUserZoom = 15;
+        globalLastUserCenter = activeLatLng;
       }
     }
 
@@ -938,9 +993,17 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
     }
   }, [coordinates, currentLocation, isTracking, splits, onSelectSplit]);
 
-  // Handle zooming to focused split marker safely
+  // Handle zooming to focused split marker safely (only when focusedSplitId actually changes)
   useEffect(() => {
-    if (!mapRef.current || !focusedSplitId) return;
+    if (!mapRef.current || !focusedSplitId) {
+      lastFocusedSplitIdRef.current = focusedSplitId;
+      return;
+    }
+
+    if (lastFocusedSplitIdRef.current === focusedSplitId) {
+      return;
+    }
+    lastFocusedSplitIdRef.current = focusedSplitId;
 
     try {
       const container = mapContainerRef.current;
@@ -1007,12 +1070,16 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
       }
 
       if (targetLatLng && mapRef.current) {
+        const currentZ = mapRef.current.getZoom();
+        const flyZoom = Math.max(currentZ, 16);
         try {
-          mapRef.current.flyTo(targetLatLng, 17, { animate: true, duration: 0.6 });
+          mapRef.current.flyTo(targetLatLng, flyZoom, { animate: true, duration: 0.6 });
         } catch {
           // If flyTo fails for any animation math reason, setView directly
-          mapRef.current.setView(targetLatLng, 17);
+          mapRef.current.setView(targetLatLng, flyZoom);
         }
+        globalLastUserZoom = flyZoom;
+        globalLastUserCenter = targetLatLng;
 
         if (targetMarker) {
           const m = targetMarker;
@@ -1038,18 +1105,24 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
 
     userInteractedRef.current = false;
     const currentZoom = mapRef.current.getZoom();
+    const preservedZoom = Math.max(currentZoom, 15);
 
     if (currentLocation) {
-      const zoomToUse = Math.max(currentZoom, 15);
-      mapRef.current.setView([currentLocation.lat, currentLocation.lng], zoomToUse, { animate: true });
+      mapRef.current.setView([currentLocation.lat, currentLocation.lng], preservedZoom, { animate: true });
+      globalLastUserZoom = preservedZoom;
+      globalLastUserCenter = [currentLocation.lat, currentLocation.lng];
     } else if (referenceCoordinates.length > 0) {
       const bounds = L.latLngBounds(referenceCoordinates.map((c) => [c.lat, c.lng]));
       if (bounds.isValid()) {
         mapRef.current.fitBounds(bounds, { padding: [35, 35], maxZoom: 16 });
+        globalLastUserZoom = mapRef.current.getZoom();
+        globalLastUserCenter = [mapRef.current.getCenter().lat, mapRef.current.getCenter().lng];
       }
     } else if (coordinates.length > 0) {
       const lastCoord = coordinates[coordinates.length - 1];
-      mapRef.current.setView([lastCoord.lat, lastCoord.lng], Math.max(currentZoom, 15), { animate: true });
+      mapRef.current.setView([lastCoord.lat, lastCoord.lng], preservedZoom, { animate: true });
+      globalLastUserZoom = preservedZoom;
+      globalLastUserCenter = [lastCoord.lat, lastCoord.lng];
     } else {
       mapRef.current.setView([37.7775, -122.4164], 15, { animate: true });
     }
@@ -1064,28 +1137,37 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
       if (mapRef.current) {
         userInteractedRef.current = true;
         mapRef.current.zoomIn();
+        globalLastUserZoom = mapRef.current.getZoom() + 1;
       }
     },
     zoomOut: () => {
       if (mapRef.current) {
         userInteractedRef.current = true;
         mapRef.current.zoomOut();
+        globalLastUserZoom = Math.max(1, mapRef.current.getZoom() - 1);
       }
     },
     recenter: () => {
       if (!mapRef.current) return;
       userInteractedRef.current = false;
       const currentZoom = mapRef.current.getZoom();
+      const preservedZoom = Math.max(currentZoom, 15);
       if (currentLocation) {
-        mapRef.current.setView([currentLocation.lat, currentLocation.lng], Math.max(currentZoom, 15), { animate: true });
+        mapRef.current.setView([currentLocation.lat, currentLocation.lng], preservedZoom, { animate: true });
+        globalLastUserZoom = preservedZoom;
+        globalLastUserCenter = [currentLocation.lat, currentLocation.lng];
       } else if (referenceCoordinates.length > 0) {
         const bounds = L.latLngBounds(referenceCoordinates.map((c) => [c.lat, c.lng]));
         if (bounds.isValid()) {
           mapRef.current.fitBounds(bounds, { padding: [35, 35], maxZoom: 16 });
+          globalLastUserZoom = mapRef.current.getZoom();
+          globalLastUserCenter = [mapRef.current.getCenter().lat, mapRef.current.getCenter().lng];
         }
       } else if (coordinates.length > 0) {
         const lastCoord = coordinates[coordinates.length - 1];
-        mapRef.current.setView([lastCoord.lat, lastCoord.lng], Math.max(currentZoom, 15), { animate: true });
+        mapRef.current.setView([lastCoord.lat, lastCoord.lng], preservedZoom, { animate: true });
+        globalLastUserZoom = preservedZoom;
+        globalLastUserCenter = [lastCoord.lat, lastCoord.lng];
       }
     },
     getMap: () => mapRef.current,
@@ -1094,14 +1176,18 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
   const handleZoomIn = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (mapRef.current) {
+      userInteractedRef.current = true;
       mapRef.current.zoomIn();
+      globalLastUserZoom = mapRef.current.getZoom() + 1;
     }
   };
 
   const handleZoomOut = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (mapRef.current) {
+      userInteractedRef.current = true;
       mapRef.current.zoomOut();
+      globalLastUserZoom = Math.max(1, mapRef.current.getZoom() - 1);
     }
   };
 
