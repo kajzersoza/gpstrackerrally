@@ -118,7 +118,9 @@ export const SplitDetailModal: React.FC<SplitDetailModalProps> = ({
   };
 
   // Generate shareable text and links
-  const coord = split.coordinate;
+  const coord = split.coordinate && typeof split.coordinate.lat === 'number' && typeof split.coordinate.lng === 'number' && !isNaN(split.coordinate.lat) && !isNaN(split.coordinate.lng)
+    ? split.coordinate
+    : null;
   const mapsUrl = coord ? `https://www.google.com/maps?q=${coord.lat},${coord.lng}` : '';
   const osmUrl = coord ? `https://www.openstreetmap.org/?mlat=${coord.lat}&mlon=${coord.lng}#map=17/${coord.lat}/${coord.lng}` : '';
 

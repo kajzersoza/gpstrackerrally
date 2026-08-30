@@ -876,14 +876,15 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
             }
           }
 
-          if (splitLoc) {
+          if (splitLoc && typeof splitLoc.lat === 'number' && typeof splitLoc.lng === 'number' && !isNaN(splitLoc.lat) && !isNaN(splitLoc.lng)) {
             const hasPhotos = split.photos && split.photos.length > 0;
             const hasNotes = !!split.notes;
-            const splitBadgeWidth = split.name ? Math.min(110, 56 + split.name.length * 6) : 54;
+            const splitNameStr = typeof split.name === 'string' ? split.name : '';
+            const splitBadgeWidth = splitNameStr ? Math.min(110, 56 + splitNameStr.length * 6) : 54;
             const splitBadgeHeight = 30;
-            const displayName = split.name
-              ? (split.name.length > 10 ? split.name.slice(0, 9) + '…' : split.name)
-              : `#${split.formattedIndex || split.splitIndex}`;
+            const displayName = splitNameStr
+              ? (splitNameStr.length > 10 ? splitNameStr.slice(0, 9) + '…' : splitNameStr)
+              : `#${split.formattedIndex || split.splitIndex || ''}`;
 
             const splitIcon = L.divIcon({
               className: 'custom-split-badge',

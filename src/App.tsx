@@ -401,11 +401,14 @@ export default function App() {
   }, [savedSessions]);
 
   // Perform a Lap / Split - accurately records the exact distance covered and captures split GPS coordinate
-  const handleSplit = useCallback((presetName?: string, presetNotes?: string) => {
+  const handleSplit = useCallback((presetName?: unknown, presetNotes?: unknown) => {
+    const cleanName = typeof presetName === 'string' && presetName.trim().length > 0 ? presetName.trim() : undefined;
+    const cleanNotes = typeof presetNotes === 'string' && presetNotes.trim().length > 0 ? presetNotes.trim() : undefined;
+
     const splitIndex = splitsRef.current.length + 1;
     // Exactly how much distance was covered in this split (no artificial fallback to 1.0)
-    const splitDist = Math.max(0, currentSplitDistRef.current);
-    const splitSec = Math.max(0, currentSplitTimeRef.current);
+    const splitDist = Math.max(0, currentSplitDistRef.current || 0);
+    const splitSec = Math.max(0, currentSplitTimeRef.current || 0);
 
     // Calculate pace in seconds per km (if distance is > 0)
     const paceSec = splitDist > 0.001 ? Math.round(splitSec / splitDist) : splitSec;
@@ -417,14 +420,17 @@ export default function App() {
     const { formattedDiff, trend } = calculateSplitTrend(paceSec, prevPace);
 
     // Get current location coordinate for map marker
-    const splitLocation = currentLocation || lastLocationRef.current || (coordinates.length > 0 ? coordinates[coordinates.length - 1] : undefined);
+    const rawLoc = currentLocation || lastLocationRef.current || (coordinates.length > 0 ? coordinates[coordinates.length - 1] : undefined);
+    const splitLocation = rawLoc && typeof rawLoc.lat === 'number' && typeof rawLoc.lng === 'number' && !isNaN(rawLoc.lat) && !isNaN(rawLoc.lng)
+      ? { lat: rawLoc.lat, lng: rawLoc.lng, altitude: rawLoc.altitude, timestamp: rawLoc.timestamp || Date.now() }
+      : undefined;
 
     const newSplit: Split = {
       id: `split-${Date.now()}-${splitIndex}`,
       splitIndex,
       formattedIndex: splitIndex.toString().padStart(2, '0'),
-      name: presetName,
-      notes: presetNotes,
+      name: cleanName,
+      notes: cleanNotes,
       distanceKm: splitDist,
       formattedDistance: `${splitDist.toFixed(2)} km`,
       timeSec: splitSec,
@@ -432,10 +438,10 @@ export default function App() {
       paceSecPerKm: paceSec,
       formattedDiff,
       trend,
-      totalDistanceKm: totalDistRef.current,
+      totalDistanceKm: totalDistRef.current || 0,
       totalTimeSec: elapsedSeconds,
       timestamp: Date.now(),
-      coordinate: splitLocation ? { ...splitLocation } : undefined,
+      coordinate: splitLocation,
     };
 
     // Prepend to list so newest split is on top

@@ -381,7 +381,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
             {/* 2. Résztáv (Split / Lap) Button */}
             <button
               id="btn-desktop-split"
-              onClick={onSplit}
+              onClick={() => onSplit()}
               disabled={trackingStatus === 'idle'}
               className={`w-full h-10 font-black text-xs md:text-sm rounded-xl transition-all flex items-center justify-center gap-1.5 font-heading ${
                 trackingStatus === 'idle'
@@ -726,7 +726,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                                 {split.formattedIndex}
                               </span>
                               <div className="min-w-0">
-                                {split.name && (
+                                {typeof split.name === 'string' && split.name.length > 0 && (
                                   <div className="text-xs font-black text-[#0050cb] truncate font-heading">
                                     {split.name}
                                   </div>
@@ -766,7 +766,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                               {hasNotes && (
                                 <div className="flex items-center gap-1 bg-white/70 px-2 py-0.5 rounded-md text-slate-700 font-medium truncate max-w-[200px]">
                                   <MessageSquare className="w-3 h-3 text-[#0050cb] flex-shrink-0" />
-                                  <span className="truncate">{split.notes}</span>
+                                  <span className="truncate">{String(split.notes)}</span>
                                 </div>
                               )}
                               {hasPhotos && (
@@ -1208,7 +1208,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                           {split.formattedIndex}
                         </span>
                         <div className="min-w-0">
-                          {split.name && (
+                          {typeof split.name === 'string' && split.name.length > 0 && (
                             <div className="text-sm font-black text-[#0050cb] truncate font-heading">
                               {split.name}
                             </div>
@@ -1218,7 +1218,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                               {formattedSplitDist.value} {formattedSplitDist.unitLabel}
                             </span>
                             <span className="text-[11px] font-bold text-slate-500 font-heading">
-                              (Össz: {formattedTotalDist.value})
+                              (Össz: {formattedTotalDist.value} {formattedTotalDist.unitLabel})
                             </span>
                           </div>
                         </div>
@@ -1246,7 +1246,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                         {hasNotes && (
                           <div className="flex items-center gap-1 text-slate-600 truncate max-w-[190px]">
                             <MessageSquare className="w-2.5 h-2.5 text-[#0050cb] flex-shrink-0" />
-                            <span className="truncate">{split.notes}</span>
+                            <span className="truncate">{String(split.notes)}</span>
                           </div>
                         )}
                         {hasPhotos && (
@@ -1397,7 +1397,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
 
           <button
             id="btn-split-lap"
-            onClick={onSplit}
+            onClick={() => onSplit()}
             disabled={trackingStatus === 'idle'}
             className={`font-black text-sm py-2.5 rounded-2xl transition-all flex items-center justify-center gap-1 font-heading ${
               trackingStatus === 'idle'

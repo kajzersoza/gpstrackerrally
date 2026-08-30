@@ -72,9 +72,10 @@ export function formatElapsedTime(totalSec: number): string {
  * Formats seconds into MM:SS
  * e.g., 312 -> "05:12"
  */
-export function formatSplitDuration(totalSec: number): string {
-  const minutes = Math.floor(totalSec / 60);
-  const seconds = Math.floor(totalSec % 60);
+export function formatSplitDuration(totalSec: number | null | undefined): string {
+  const safeSec = typeof totalSec === 'number' && !isNaN(totalSec) ? Math.max(0, Math.round(totalSec)) : 0;
+  const minutes = Math.floor(safeSec / 60);
+  const seconds = Math.floor(safeSec % 60);
   return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
@@ -82,8 +83,10 @@ export function formatSplitDuration(totalSec: number): string {
  * Formats timestamp into HH:mm clock time
  * e.g., 14:30
  */
-export function formatClockTime(timestamp: number | Date): string {
+export function formatClockTime(timestamp: number | Date | null | undefined): string {
+  if (!timestamp) return '00:00';
   const date = new Date(timestamp);
+  if (isNaN(date.getTime())) return '00:00';
   const hours = date.getHours().toString().padStart(2, '0');
   const minutes = date.getMinutes().toString().padStart(2, '0');
   return `${hours}:${minutes}`;
@@ -93,14 +96,17 @@ export function formatClockTime(timestamp: number | Date): string {
  * Calculates pace difference and trend against the previous split
  */
 export function calculateSplitTrend(
-  currentPaceSec: number,
-  previousPaceSec?: number
+  currentPaceSec: number | null | undefined,
+  previousPaceSec?: number | null
 ): { formattedDiff: string; trend: 'up' | 'down' | 'same' } {
-  if (previousPaceSec === undefined || previousPaceSec === 0) {
+  const safeCurrent = typeof currentPaceSec === 'number' && !isNaN(currentPaceSec) ? currentPaceSec : 0;
+  const safePrev = typeof previousPaceSec === 'number' && !isNaN(previousPaceSec) ? previousPaceSec : undefined;
+
+  if (safePrev === undefined || safePrev === 0) {
     return { formattedDiff: '+0:00', trend: 'same' };
   }
 
-  const diffSec = currentPaceSec - previousPaceSec;
+  const diffSec = safeCurrent - safePrev;
   const isSlower = diffSec > 0; // + pace means took longer (trend up icon in screenshot)
   const isFaster = diffSec < 0; // - pace means faster (trend down icon in screenshot)
 
@@ -243,43 +249,46 @@ export function getInitialDemoSplits(): Split[] {
 /**
  * Compute the reliable cumulative distance from start point to this split
  */
-export function getCumulativeDistanceForSplit(split: Split, allSplits: Split[]): number {
-  if (typeof split.totalDistanceKm === 'number' && split.totalDistanceKm > 0) {
+export function getCumulativeDistanceForSplit(split: Split | null | undefined, allSplits: Split[] = []): number {
+  if (!split) return 0;
+  if (typeof split.totalDistanceKm === 'number' && !isNaN(split.totalDistanceKm) && split.totalDistanceKm > 0) {
     return split.totalDistanceKm;
   }
   // Fallback calculation: sum distances of all splits up to this splitIndex
-  const sorted = [...allSplits].sort((a, b) => a.splitIndex - b.splitIndex);
+  const safeList = Array.isArray(allSplits) ? allSplits : [];
+  const sorted = [...safeList].sort((a, b) => (a.splitIndex || 0) - (b.splitIndex || 0));
   let sum = 0;
   for (const s of sorted) {
-    sum += s.distanceKm || 0;
-    if (s.id === split.id || s.splitIndex === split.splitIndex) {
+    sum += (typeof s.distanceKm === 'number' && !isNaN(s.distanceKm) ? s.distanceKm : 0);
+    if (s.id === split.id || (s.splitIndex && s.splitIndex === split.splitIndex)) {
       break;
     }
   }
-  return sum > 0 ? +sum.toFixed(3) : split.distanceKm || 0;
+  return sum > 0 ? +sum.toFixed(3) : (typeof split.distanceKm === 'number' && !isNaN(split.distanceKm) ? split.distanceKm : 0);
 }
 
 /**
  * Format distance according to unit: km, m, or mi
  */
 export function formatDistanceByUnit(
-  distanceKm: number,
-  unit: 'km' | 'm' | 'mi'
+  distanceKm: number | null | undefined,
+  unit: 'km' | 'm' | 'mi' = 'km'
 ): { value: string; unitLabel: string } {
+  const safeKm = typeof distanceKm === 'number' && !isNaN(distanceKm) ? Math.max(0, distanceKm) : 0;
   if (unit === 'm') {
-    const meters = Math.round(distanceKm * 1000);
+    const meters = Math.round(safeKm * 1000);
     return {
       value: meters.toLocaleString('hu-HU').replace(/,/g, ' '),
       unitLabel: 'm',
     };
   } else if (unit === 'mi') {
     return {
-      value: (distanceKm * 0.621371).toFixed(2),
+      value: (safeKm * 0.621371).toFixed(2),
       unitLabel: 'mi',
     };
   } else {
     return {
-      value: distanceKm.toFixed(2),
+      value: safeKm.toFixed(2),
       unitLabel: 'km',
     };
   }
