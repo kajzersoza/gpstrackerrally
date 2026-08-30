@@ -458,6 +458,27 @@ export default function App() {
     if (settings.hapticsEnabled) triggerHaptic([50, 40, 50]);
   }, [elapsedSeconds, settings.soundEnabled, settings.hapticsEnabled, currentLocation, coordinates]);
 
+  const trackingStatusRef = useRef<TrackingStatus>(trackingStatus);
+  const settingsRef = useRef<UserSettings>(settings);
+  const handleSplitRef = useRef(handleSplit);
+  const coordinatesRef = useRef<Coordinate[]>(coordinates);
+
+  useEffect(() => {
+    trackingStatusRef.current = trackingStatus;
+  }, [trackingStatus]);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
+  useEffect(() => {
+    handleSplitRef.current = handleSplit;
+  }, [handleSplit]);
+
+  useEffect(() => {
+    coordinatesRef.current = coordinates;
+  }, [coordinates]);
+
   // Continuous Location Service: ALWAYS acquires real-time GPS position for map, distance calculations, and guidance
   useEffect(() => {
     if (typeof window === 'undefined' || !('geolocation' in navigator) || settings.simulationMode) {
@@ -466,20 +487,33 @@ export default function App() {
 
     const handlePosition = (pos: GeolocationPosition) => {
       const now = Date.now();
+      const accuracy = typeof pos.coords.accuracy === 'number' && !isNaN(pos.coords.accuracy) ? pos.coords.accuracy : null;
+      const speed = typeof pos.coords.speed === 'number' && !isNaN(pos.coords.speed) ? pos.coords.speed : null;
+      const altitude = typeof pos.coords.altitude === 'number' && !isNaN(pos.coords.altitude) ? pos.coords.altitude : null;
+
       const newCoord: Coordinate = {
         lat: pos.coords.latitude,
         lng: pos.coords.longitude,
-        altitude: pos.coords.altitude,
-        speed: pos.coords.speed,
-        accuracy: pos.coords.accuracy,
+        altitude,
+        speed,
+        accuracy,
         timestamp: now,
       };
 
       setCurrentLocation(newCoord);
 
+      const currentStatus = trackingStatusRef.current;
+      const curSettings = settingsRef.current;
+
       // If workout recording is actively running, log coordinates and calculate distance
-      if (trackingStatus === 'running') {
-        const modeConfig = getActivityModeConfig(settings.activityMode);
+      if (currentStatus === 'running') {
+        const modeConfig = getActivityModeConfig(curSettings.activityMode);
+
+        // Quality Filter: Reject wild GPS jumps where accuracy is worse than 70m if we already have a prior fix
+        if (accuracy && accuracy > 70 && lastLocationRef.current) {
+          return;
+        }
+
         if (lastLocationRef.current) {
           const timeSinceLastLog = now - lastLogTimestampRef.current;
           const addedDist = calculateDistance(
@@ -489,8 +523,17 @@ export default function App() {
             newCoord.lng
           );
 
-          // Dynamic throttle: car logs frequently (every 1s), walking logs every 5s to save battery & avoid jitter
-          if (timeSinceLastLog < modeConfig.intervalMs && addedDist < modeConfig.minDistanceKm * 2) {
+          // Dynamic throttle based on mode: car logs frequently (every 1s), walking logs every 3-4s to avoid micro jitter
+          if (timeSinceLastLog < modeConfig.intervalMs && addedDist < modeConfig.minDistanceKm * 1.5) {
+            return;
+          }
+
+          // Impossible speed jump filter (reject cellular tower teleportation spikes)
+          const timeDiffSec = Math.max(0.5, (now - (lastLocationRef.current.timestamp || lastLogTimestampRef.current || now - 1000)) / 1000);
+          const impliedSpeedKmh = (addedDist / timeDiffSec) * 3600;
+          const maxAllowedSpeedKmh = curSettings.activityMode === 'car' ? 220 : curSettings.activityMode === 'cycling' ? 85 : 35;
+          if (impliedSpeedKmh > maxAllowedSpeedKmh && addedDist > 0.05) {
+            console.warn(`Spurious GPS jump rejected: ${impliedSpeedKmh.toFixed(1)} km/h (${(addedDist * 1000).toFixed(0)}m in ${timeDiffSec.toFixed(1)}s)`);
             return;
           }
 
@@ -502,10 +545,14 @@ export default function App() {
               const updated = +(prev + addedDist).toFixed(3);
               // Auto Split check
               if (
-                settings.autoSplitDistanceKm > 0 &&
-                updated >= settings.autoSplitDistanceKm
+                curSettings.autoSplitDistanceKm > 0 &&
+                updated >= curSettings.autoSplitDistanceKm
               ) {
-                setTimeout(handleSplit, 0);
+                setTimeout(() => {
+                  if (handleSplitRef.current) {
+                    handleSplitRef.current();
+                  }
+                }, 0);
               }
               return updated;
             });
@@ -523,23 +570,26 @@ export default function App() {
     };
 
     const handleError = (err: GeolocationPositionError) => {
-      console.warn('Continuous GPS watch warning:', err.message);
+      // Don't spam console on transient timeouts
+      if (err.code === 3) {
+        console.warn('GPS position timeout (acquiring satellite fix)...');
+      } else {
+        console.warn('Continuous GPS watch notice:', err.message);
+      }
     };
-
-    const modeConfig = getActivityModeConfig(settings.activityMode);
 
     // Immediate initial fix
     navigator.geolocation.getCurrentPosition(handlePosition, handleError, {
       enableHighAccuracy: settings.highAccuracy,
-      timeout: 10000,
-      maximumAge: 0,
+      timeout: 15000,
+      maximumAge: 1000,
     });
 
-    // Continuous watch
+    // Continuous watch with generous timeout and standard maximumAge to avoid satellite lock renegotiation
     const watchId = navigator.geolocation.watchPosition(handlePosition, handleError, {
       enableHighAccuracy: settings.highAccuracy,
-      maximumAge: 0,
-      timeout: modeConfig.gpsTimeout || 10000,
+      maximumAge: 1000,
+      timeout: 25000,
     });
 
     watchIdRef.current = watchId;
@@ -553,9 +603,6 @@ export default function App() {
   }, [
     settings.simulationMode,
     settings.highAccuracy,
-    settings.activityMode,
-    trackingStatus,
-    handleSplit,
     getActivityModeConfig,
   ]);
 

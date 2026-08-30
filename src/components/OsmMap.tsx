@@ -75,6 +75,22 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
   const lastFocusedSplitIdRef = useRef<string | null>(null);
   const [showLayersMenu, setShowLayersMenu] = useState(false);
   const [internalLayer, setInternalLayer] = useState<MapLayerType>(mapLayer);
+  const [isAutoFollow, setIsAutoFollow] = useState<boolean>(true);
+  const isAutoFollowRef = useRef<boolean>(true);
+
+  // Sync auto-follow ref
+  useEffect(() => {
+    isAutoFollowRef.current = isAutoFollow;
+  }, [isAutoFollow]);
+
+  // If tracking starts, automatically re-engage auto-follow
+  useEffect(() => {
+    if (isTracking) {
+      setIsAutoFollow(true);
+      isAutoFollowRef.current = true;
+      userInteractedRef.current = false;
+    }
+  }, [isTracking]);
 
   // Sync internal layer with prop if prop changes
   useEffect(() => {
@@ -220,6 +236,8 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
     });
     map.on('dragstart', () => {
       userInteractedRef.current = true;
+      isAutoFollowRef.current = false;
+      setIsAutoFollow(false);
     });
     map.on('dragend', () => {
       if (mapRef.current) {
@@ -229,7 +247,6 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
     });
     map.on('touchstart', () => {
       isUserTouchingRef.current = true;
-      userInteractedRef.current = true;
     });
     map.on('touchend', () => {
       setTimeout(() => {
@@ -834,8 +851,9 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
         currentMarkerRef.current.setIcon(customIcon);
       }
 
-      // If active tracking, smoothly center map on current position so the growing line is followed (panTo strictly preserves user zoom level)
-      if (isTracking && mapRef.current && !isUserTouchingRef.current) {
+      // If auto-follow is active or tracking is running, smoothly center map on current position so the user location is followed in real-time
+      // This operates smoothly whether recording, paused, or navigating along a loaded reference track
+      if (isAutoFollowRef.current && mapRef.current && !isUserTouchingRef.current) {
         mapRef.current.panTo(activeLatLng, { animate: true, duration: 0.3 });
         globalLastUserCenter = activeLatLng;
       } else if (
@@ -1105,6 +1123,8 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
     if (!mapRef.current) return;
 
     userInteractedRef.current = false;
+    setIsAutoFollow(true);
+    isAutoFollowRef.current = true;
     const currentZoom = mapRef.current.getZoom();
     const preservedZoom = Math.max(currentZoom, 15);
 
@@ -1151,6 +1171,8 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
     recenter: () => {
       if (!mapRef.current) return;
       userInteractedRef.current = false;
+      setIsAutoFollow(true);
+      isAutoFollowRef.current = true;
       const currentZoom = mapRef.current.getZoom();
       const preservedZoom = Math.max(currentZoom, 15);
       if (currentLocation) {
@@ -1315,10 +1337,14 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
         id="btn-recenter-map"
         type="button"
         onClick={handleRecenterClick}
-        title="Centrálás jelenlegi helyre"
-        className="absolute bottom-2.5 right-2.5 z-10 w-8 h-8 bg-white/95 hover:bg-white text-slate-700 hover:text-[#0050cb] rounded-xl shadow-md flex items-center justify-center border border-slate-200/80 active:scale-90 transition-transform cursor-pointer"
+        title={isAutoFollow ? "GPS követés aktív (kattints a pozícióhoz)" : "GPS követés bekapcsolása (pozícióra ugrás)"}
+        className={`absolute bottom-2.5 right-2.5 z-10 w-8 h-8 rounded-xl shadow-md flex items-center justify-center border active:scale-90 transition-all cursor-pointer ${
+          isAutoFollow
+            ? 'bg-[#0050cb] text-white border-[#0050cb] shadow-blue-500/30 ring-2 ring-blue-400/40'
+            : 'bg-white/95 hover:bg-white text-slate-700 hover:text-[#0050cb] border-slate-200/80'
+        }`}
       >
-        <Crosshair className="w-4 h-4 text-slate-700 hover:text-[#0050cb]" />
+        <Crosshair className={`w-4 h-4 ${isAutoFollow ? 'text-white' : 'text-slate-700 hover:text-[#0050cb]'}`} />
       </button>
     </div>
   );

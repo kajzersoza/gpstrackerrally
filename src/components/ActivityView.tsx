@@ -438,8 +438,25 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
             <div className="bg-slate-50 p-2 rounded-xl border border-slate-200/70 space-y-1">
               <div className="flex items-center justify-between text-slate-500 font-medium text-[10.5px]">
                 <span>GPS:</span>
-                <span className="font-bold text-slate-800">
-                  {settings.simulationMode ? 'Szimuláció' : 'Valós'}
+                <span className="font-bold text-slate-800 flex items-center gap-1">
+                  {settings.simulationMode ? (
+                    <span>Szimuláció</span>
+                  ) : currentLocation?.accuracy != null ? (
+                    <>
+                      <span>Valós</span>
+                      <span className={`text-[9px] px-1 py-0.5 rounded font-mono font-bold ${
+                        currentLocation.accuracy <= 10
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : currentLocation.accuracy <= 25
+                          ? 'bg-blue-100 text-blue-700'
+                          : 'bg-amber-100 text-amber-700'
+                      }`}>
+                        ±{Math.round(currentLocation.accuracy)}m
+                      </span>
+                    </>
+                  ) : (
+                    <span>Valós</span>
+                  )}
                 </span>
               </div>
               <div className="flex items-center justify-between text-slate-500 font-medium text-[10.5px]">
@@ -606,7 +623,18 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
                 className="bg-white hover:bg-blue-50/40 rounded-xl px-3 py-1.5 shadow-2xs border border-slate-200/80 hover:border-blue-300 flex flex-col justify-between text-left transition-all active:scale-98 cursor-pointer relative group"
               >
                 <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase">
-                  <span>GPS Pozíció</span>
+                  <div className="flex items-center gap-1">
+                    <span>GPS Pozíció</span>
+                    {currentLocation?.accuracy != null && (
+                      <span className={`text-[8.5px] px-1 py-0.2 rounded font-mono font-bold ${
+                        currentLocation.accuracy <= 10
+                          ? 'bg-emerald-50 text-emerald-600'
+                          : 'bg-blue-50 text-blue-600'
+                      }`}>
+                        ±{Math.round(currentLocation.accuracy)}m
+                      </span>
+                    )}
+                  </div>
                   <MapPin className="w-3 h-3 text-[#0060e6] group-hover:scale-110 transition-transform" />
                 </div>
                 <div className="font-mono font-bold text-slate-800 text-xs truncate">
@@ -1093,8 +1121,17 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
               title="Kattints a koordináták részleteihez"
               className="bg-white hover:bg-blue-50/40 rounded-2xl px-3.5 py-2 min-h-[58px] shadow-sm border border-slate-100/80 flex flex-col justify-center text-left transition-all active:scale-98 cursor-pointer relative group"
             >
-              <div className="absolute top-1.5 right-1.5 opacity-60">
-                <MapPin className="w-3 h-3 text-[#0060e6]" />
+              <div className="absolute top-1.5 right-1.5 flex items-center gap-1">
+                {currentLocation?.accuracy != null && (
+                  <span className={`text-[8px] px-1 py-0.2 rounded font-mono font-bold ${
+                    currentLocation.accuracy <= 10
+                      ? 'bg-emerald-50 text-emerald-600'
+                      : 'bg-blue-50 text-blue-600'
+                  }`}>
+                    ±{Math.round(currentLocation.accuracy)}m
+                  </span>
+                )}
+                <MapPin className="w-3 h-3 text-[#0060e6] opacity-60" />
               </div>
               <span className="text-[12px] font-bold text-slate-800 font-mono leading-tight truncate">
                 {activeLat.toFixed(5)}°
