@@ -948,9 +948,9 @@ export default function App() {
   };
 
   return (
-    <div className="w-screen h-screen flex flex-col bg-[#f4f7fb] select-none overflow-hidden text-[#191c1e]">
-      {/* Full-width responsive container */}
-      <div className="w-full h-full flex flex-col overflow-hidden relative">
+    <div className="w-full h-full h-[100dvh] min-h-[100dvh] max-h-[100dvh] flex flex-col bg-[#f4f7fb] select-none overflow-hidden text-[#191c1e]">
+      {/* Main Viewport Container: takes remaining height above BottomNav */}
+      <div className="flex-1 min-h-0 w-full flex flex-col overflow-hidden relative">
         {/* Active Tab View */}
         <ErrorBoundary fallbackTitle="Hiba történt az oldal betöltése során">
           {activeTab === 'activity' && (
@@ -1035,11 +1035,12 @@ export default function App() {
             />
           )}
         </ErrorBoundary>
+      </div>
 
-        {/* Fixed Bottom Navigation */}
-        <BottomNav activeTab={activeTab} onSelectTab={setActiveTab} />
+      {/* Fixed Bottom Navigation - Guaranteed visible at bottom */}
+      <BottomNav activeTab={activeTab} onSelectTab={setActiveTab} />
 
-        {/* Modals & Drawers */}
+      {/* Modals & Drawers */}
         <CoordinateModal
           isOpen={isCoordinateModalOpen}
           onClose={() => setIsCoordinateModalOpen(false)}
@@ -1093,6 +1094,5 @@ export default function App() {
           onTrackLoaded={handleTrackLoadedFromCloud}
         />
       </div>
-    </div>
-  );
-}
+    );
+  }

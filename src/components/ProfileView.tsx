@@ -97,7 +97,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#f4f7fb] relative">
+    <div className="flex-1 min-h-0 flex flex-col w-full overflow-hidden bg-[#f4f7fb] relative">
       {/* Toast */}
       {toast && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900/90 text-white text-xs font-bold px-4 py-2 rounded-full shadow-lg flex items-center gap-2 animate-fade-in pointer-events-none">

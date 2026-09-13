@@ -141,7 +141,7 @@ export const MapsView: React.FC<MapsViewProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-[#f4f7fb] relative select-none">
+    <div className="flex-1 min-h-0 flex flex-col w-full overflow-hidden bg-[#f4f7fb] relative select-none">
       {/* Top Header Bar */}
       <header className="flex-shrink-0 px-3 sm:px-4 py-2.5 bg-white/95 backdrop-blur-md border-b border-slate-200 flex items-center justify-between z-20 shadow-2xs">
         <div className="flex items-center gap-2">
