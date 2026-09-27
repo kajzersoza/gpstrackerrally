@@ -246,6 +246,171 @@ export function getInitialDemoSplits(): Split[] {
   ];
 }
 
+export interface SlopeMetrics {
+  angleDeg: number;
+  gradePercent: number;
+  direction: 'up' | 'down' | 'flat';
+  label: string;
+  shortLabel: string;
+  formattedAngle: string;
+  formattedGrade: string;
+  altitudeMeters: number | null;
+  hasAltitudeData: boolean;
+  horizontalDistanceMeters: number;
+  elevationDeltaMeters: number;
+}
+
+/**
+ * Calculates current slope / grade / angle of incline or decline based on GPS position,
+ * distance, speed, and elevation data.
+ */
+export function calculateSlopeMetrics(
+  currentLocation: Coordinate | null,
+  coordinates: Coordinate[],
+  currentSpeedKmh: number = 0
+): SlopeMetrics {
+  const defaultMetrics: SlopeMetrics = {
+    angleDeg: 0,
+    gradePercent: 0,
+    direction: 'flat',
+    label: 'Sík terep (0.0°)',
+    shortLabel: 'Sík terep',
+    formattedAngle: '0.0°',
+    formattedGrade: '0%',
+    altitudeMeters: null,
+    hasAltitudeData: false,
+    horizontalDistanceMeters: 0,
+    elevationDeltaMeters: 0,
+  };
+
+  const curr = currentLocation || (coordinates && coordinates.length > 0 ? coordinates[coordinates.length - 1] : null);
+  if (!curr) return defaultMetrics;
+
+  const currAlt = typeof curr.altitude === 'number' && !isNaN(curr.altitude) ? curr.altitude : null;
+  const coordsList = coordinates && coordinates.length > 0 ? coordinates : (currentLocation ? [currentLocation] : []);
+
+  // Check if any recent coordinates have altitude data
+  let latestAlt = currAlt;
+  if (latestAlt === null) {
+    for (let i = coordsList.length - 1; i >= 0; i--) {
+      if (typeof coordsList[i].altitude === 'number' && !isNaN(coordsList[i].altitude!)) {
+        latestAlt = coordsList[i].altitude!;
+        break;
+      }
+    }
+  }
+
+  if (latestAlt === null) {
+    return {
+      ...defaultMetrics,
+      hasAltitudeData: false,
+      label: 'Sík (nincs magasság adat)',
+    };
+  }
+
+  // If user is essentially stationary (< 1 km/h) or only 1 point
+  if (coordsList.length < 2) {
+    return {
+      ...defaultMetrics,
+      altitudeMeters: Math.round(latestAlt),
+      hasAltitudeData: true,
+      label: 'Álló helyzet (0.0°)',
+      shortLabel: 'Álló helyzet',
+    };
+  }
+
+  // Find a stable reference point backwards in the coordinate trail
+  // Target window: 10m to 50m to avoid GPS altitude jitter noise
+  let accumulatedDistMeters = 0;
+  let refCoord: Coordinate | null = null;
+  const n = coordsList.length;
+
+  for (let i = n - 2; i >= 0; i--) {
+    const c1 = coordsList[i];
+    const c2 = coordsList[i + 1];
+    const legMeters = calculateDistance(c1.lat, c1.lng, c2.lat, c2.lng) * 1000;
+    accumulatedDistMeters += legMeters;
+
+    if (typeof c1.altitude === 'number' && !isNaN(c1.altitude)) {
+      refCoord = c1;
+      if (accumulatedDistMeters >= 10) {
+        break;
+      }
+    }
+  }
+
+  // If accumulated distance is very small (< 3m), and speed is near 0, treat as flat
+  if (accumulatedDistMeters < 3 && currentSpeedKmh < 1.5) {
+    return {
+      ...defaultMetrics,
+      altitudeMeters: Math.round(latestAlt),
+      hasAltitudeData: true,
+      label: 'Sík terep (0.0°)',
+      shortLabel: 'Sík terep',
+    };
+  }
+
+  if (refCoord && typeof refCoord.altitude === 'number' && !isNaN(refCoord.altitude)) {
+    const deltaAltMeters = latestAlt - refCoord.altitude;
+    const horizDistMeters = Math.max(accumulatedDistMeters, 3);
+
+    // Calculate slope grade % = (rise / run) * 100
+    let grade = (deltaAltMeters / horizDistMeters) * 100;
+    grade = Math.max(-45, Math.min(45, grade));
+
+    // Calculate angle in degrees = arctan(rise / run) in degrees
+    let angle = (Math.atan(deltaAltMeters / horizDistMeters) * 180) / Math.PI;
+    angle = Math.max(-30, Math.min(30, angle));
+
+    // Damp down angle if speed is very low (< 2 km/h) to suppress static GPS drift
+    if (currentSpeedKmh < 2) {
+      const damping = Math.max(0.2, currentSpeedKmh / 2);
+      angle = angle * damping;
+      grade = grade * damping;
+    }
+
+    const roundedAngle = Math.round(angle * 10) / 10;
+    const roundedGrade = Math.round(grade);
+
+    let direction: 'up' | 'down' | 'flat' = 'flat';
+    let shortLabel = 'Sík terep';
+    let label = 'Sík terep';
+    let sign = '';
+
+    if (roundedAngle >= 0.5) {
+      direction = 'up';
+      shortLabel = 'Felfelé menet';
+      label = 'Felfelé menet';
+      sign = '+';
+    } else if (roundedAngle <= -0.5) {
+      direction = 'down';
+      shortLabel = 'Lejtmenet';
+      label = 'Lejtmenet';
+      sign = roundedAngle < 0 ? '' : '-';
+    }
+
+    return {
+      angleDeg: roundedAngle,
+      gradePercent: roundedGrade,
+      direction,
+      label: `${label} (${sign}${roundedAngle.toFixed(1)}°)`,
+      shortLabel,
+      formattedAngle: `${sign}${roundedAngle.toFixed(1)}°`,
+      formattedGrade: `${roundedGrade > 0 ? '+' : ''}${roundedGrade}%`,
+      altitudeMeters: Math.round(latestAlt),
+      hasAltitudeData: true,
+      horizontalDistanceMeters: Math.round(accumulatedDistMeters),
+      elevationDeltaMeters: Math.round(deltaAltMeters * 10) / 10,
+    };
+  }
+
+  return {
+    ...defaultMetrics,
+    altitudeMeters: Math.round(latestAlt),
+    hasAltitudeData: true,
+  };
+}
+
 /**
  * Compute the reliable cumulative distance from start point to this split
  */

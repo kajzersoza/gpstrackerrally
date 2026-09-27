@@ -15,11 +15,14 @@ import {
   calculateSplitTrend,
   formatSplitDuration,
   formatClockTime,
+  formatDistanceByUnit,
+  formatElapsedTime,
   getInitialDemoPath,
   getInitialDemoSplits,
   exportToGPX,
   SAN_FRANCISCO_BASE,
 } from './utils/geoUtils';
+import { CheckCircle2 } from 'lucide-react';
 import { playBeep, triggerHaptic } from './utils/soundUtils';
 import { ActivityView } from './components/ActivityView';
 import { HistoryView } from './components/HistoryView';
@@ -68,6 +71,14 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
   const [isCoordinateModalOpen, setIsCoordinateModalOpen] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((cur) => (cur === msg ? null : cur));
+    }, 3500);
+  }, []);
 
   // Settings
   const [settings, setSettings] = useState<UserSettings>(() => {
@@ -751,24 +762,34 @@ export default function App() {
         paceSecPerKm: paceSec,
         formattedDiff,
         trend,
-        totalDistanceKm: totalDistRef.current,
+        totalDistanceKm: totalDistRef.current || totalDistanceKm || 0,
         totalTimeSec: elapsedSeconds,
         timestamp: Date.now(),
         coordinate: splitLoc ? { ...splitLoc } : undefined,
       };
       finalSplits = [lastSplit, ...finalSplits];
       setSplits(finalSplits);
+      splitsRef.current = finalSplits;
       setCurrentSplitDistanceKm(0);
       setCurrentSplitTimeSec(0);
       currentSplitDistRef.current = 0;
       currentSplitTimeRef.current = 0;
     }
 
-    // Save session if we tracked anything
-    if (totalDistanceKm > 0.02 || finalSplits.length > 0) {
-      const startTimestamp = startTime || Date.now();
-      const avgPace = totalDistanceKm > 0 ? Math.round(elapsedSeconds / totalDistanceKm) : 0;
-      const avgSpeed = elapsedSeconds > 0 ? +((totalDistanceKm / (elapsedSeconds / 3600)).toFixed(1)) : 0;
+    const effectiveDist = Math.max(totalDistRef.current || 0, totalDistanceKm || 0);
+    const effectiveTime = Math.max(elapsedSeconds || 0, startTime ? Math.round((Date.now() - startTime) / 1000) : 0);
+    let effectiveCoords = coordinatesRef.current.length > 0 ? [...coordinatesRef.current] : [...coordinates];
+    if (effectiveCoords.length === 0 && currentLocation) {
+      effectiveCoords = [currentLocation];
+    }
+
+    // Save session if anything was tracked (distance, points, time, or splits)
+    const shouldSave = effectiveDist > 0 || finalSplits.length > 0 || effectiveCoords.length > 0 || effectiveTime > 0 || startTime !== null;
+
+    if (shouldSave) {
+      const startTimestamp = startTime || (Date.now() - effectiveTime * 1000);
+      const avgPace = effectiveDist > 0 ? Math.round(effectiveTime / effectiveDist) : 0;
+      const avgSpeed = effectiveTime > 0 ? +((effectiveDist / (effectiveTime / 3600)).toFixed(1)) : 0;
 
       const dateObj = new Date(startTimestamp);
       const dateStr = `${dateObj.getFullYear()}.${(dateObj.getMonth() + 1).toString().padStart(2, '0')}.${dateObj.getDate().toString().padStart(2, '0')}`;
@@ -780,19 +801,31 @@ export default function App() {
         endTime: Date.now(),
         formattedStartTime: formatClockTime(startTimestamp),
         formattedDate: dateStr,
-        totalDistanceKm,
-        totalDurationSec: elapsedSeconds,
+        totalDistanceKm: effectiveDist,
+        totalDurationSec: effectiveTime,
         avgPaceSecPerKm: avgPace,
         maxSpeedKmh: +(avgSpeed * 1.3).toFixed(1),
         avgSpeedKmh: avgSpeed,
         splits: finalSplits,
-        coordinates: [...coordinates],
+        coordinates: effectiveCoords,
       };
 
-      setSavedSessions((prev) => [newSession, ...prev]);
+      setSavedSessions((prev) => {
+        const updated = [newSession, ...prev];
+        try {
+          localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(updated));
+        } catch {
+          // ignore
+        }
+        return updated;
+      });
+
+      const distFormatted = formatDistanceByUnit(effectiveDist, settings.unit);
+      showToast(`✓ Rögzítés sikeresen elmentve az Előzményekbe! (${distFormatted.value} ${distFormatted.unitLabel}, ${formatElapsedTime(effectiveTime)})`);
+      setActiveTab('history');
     }
 
-    // Nullázás: Completely zero out the main screen so it's fresh and ready
+    // Nullázás: Completely zero out the active state so it's fresh and ready
     setTrackingStatus('idle');
     setElapsedSeconds(0);
     setTotalDistanceKm(0);
@@ -949,6 +982,14 @@ export default function App() {
 
   return (
     <div className="w-full h-full h-[100dvh] min-h-[100dvh] max-h-[100dvh] flex flex-col bg-[#f4f7fb] select-none overflow-hidden text-[#191c1e]">
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[10000] max-w-[92vw] sm:max-w-md bg-slate-900/95 text-white px-4 py-2.5 rounded-2xl shadow-2xl border border-slate-700/60 backdrop-blur-md flex items-center gap-2.5 text-xs sm:text-sm font-bold animate-in fade-in slide-in-from-top-4 duration-200">
+          <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 shrink-0" />
+          <span className="truncate">{toastMessage}</span>
+        </div>
+      )}
+
       {/* Main Viewport Container: takes remaining height above BottomNav */}
       <div className="flex-1 min-h-0 w-full flex flex-col overflow-hidden relative">
         {/* Active Tab View */}

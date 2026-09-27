@@ -21,6 +21,11 @@ import {
   Sparkles,
   Plus,
   Minus,
+  Mountain,
+  TrendingUp,
+  TrendingDown,
+  ArrowUpRight,
+  ArrowDownRight,
 } from 'lucide-react';
 import { Coordinate, Split, TrackingStatus, UserSettings, ActivitySession } from '../types';
 import { OsmMap, OsmMapHandle, MapLayerType } from './OsmMap';
@@ -32,6 +37,8 @@ import {
   formatSplitDuration,
   calculateReferenceMetrics,
   ReferenceTrackMetrics,
+  calculateSlopeMetrics,
+  SlopeMetrics,
 } from '../utils/geoUtils';
 import { DEFAULT_RALLY_PRESETS, getPresetIcon } from '../constants/rallyPresets';
 
@@ -126,6 +133,11 @@ export const MapsView: React.FC<MapsViewProps> = ({
     }
     return 0;
   }, [currentLocation, elapsedSeconds, totalDistanceKm]);
+
+  // Slope / Incline / Grade calculation (Lejtmenet / Felfelé menet szög és meredekség)
+  const slopeMetrics: SlopeMetrics = useMemo(() => {
+    return calculateSlopeMetrics(currentLocation, coordinates, currentSpeedKmh);
+  }, [currentLocation, coordinates, currentSpeedKmh]);
 
   // Formatted main distance
   const formattedDistance = formatDistanceByUnit(totalDistanceKm, settings.unit);
@@ -251,7 +263,7 @@ export const MapsView: React.FC<MapsViewProps> = ({
         />
 
         {/* Floating Top-Left HUD Pill: Live Metrics or Next Checkpoint during Tracking / Route Following */}
-        <div className="absolute top-3 left-3 z-10 flex flex-col gap-2 max-w-[calc(100vw-80px)] sm:max-w-xs pointer-events-none">
+        <div className="absolute top-3 left-3 z-10 flex flex-col gap-2 max-w-[calc(100vw-70px)] sm:max-w-[340px] pointer-events-none">
           {/* Collapsible HUD Card */}
           <div className="bg-white/95 backdrop-blur-md px-3 py-2 sm:p-3 rounded-2xl shadow-xl border border-slate-200/90 pointer-events-auto transition-all">
             <div
@@ -277,10 +289,24 @@ export const MapsView: React.FC<MapsViewProps> = ({
                     </span>
                   </div>
                 ) : (
-                  <span className="font-mono font-black text-[#0050cb] text-sm normal-case tracking-normal flex items-baseline gap-1">
-                    <span>{formattedDistance.value}</span>
-                    <span className="text-xs font-bold text-slate-500">{formattedDistance.unitLabel}</span>
-                  </span>
+                  <div className="flex items-center gap-2 overflow-hidden">
+                    <span className="font-mono font-black text-[#0050cb] text-base normal-case tracking-normal flex items-baseline gap-1">
+                      <span>{formattedDistance.value}</span>
+                      <span className="text-xs font-bold text-slate-500">{formattedDistance.unitLabel}</span>
+                    </span>
+                    {trackingStatus === 'running' && (
+                      <span className={`text-xs font-mono font-black px-1.5 py-0.5 rounded-md flex items-center gap-0.5 ${
+                        slopeMetrics.direction === 'up'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : slopeMetrics.direction === 'down'
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-slate-100 text-slate-700'
+                      }`}>
+                        {slopeMetrics.direction === 'up' ? '↗' : slopeMetrics.direction === 'down' ? '↘' : '─'}
+                        {slopeMetrics.formattedAngle}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
               <button
@@ -313,92 +339,190 @@ export const MapsView: React.FC<MapsViewProps> = ({
                         </span>
                       </div>
 
-                      <div className="text-xs font-black text-slate-800 truncate mt-0.5" title={referenceMetrics.nextSplit.name}>
+                      <div className="text-sm font-black text-slate-800 truncate mt-0.5" title={referenceMetrics.nextSplit.name}>
                         {referenceMetrics.nextSplit.name}
                       </div>
 
                       <div className="flex items-baseline justify-between mt-1">
-                        <div className="text-xl font-black font-mono text-purple-700 leading-tight">
+                        <div className="text-2xl sm:text-3xl font-black font-mono text-purple-700 leading-tight">
                           {referenceMetrics.nextSplit.formattedRelative}
                         </div>
-                        <div className="flex items-center gap-1 text-[11px] font-bold text-slate-600 bg-white/80 px-1.5 py-0.5 rounded-md border border-purple-100">
-                          <Compass className="w-3 h-3 text-purple-600" />
+                        <div className="flex items-center gap-1 text-xs font-bold text-slate-700 bg-white/90 px-2 py-0.5 rounded-lg border border-purple-100">
+                          <Compass className="w-3.5 h-3.5 text-purple-600" />
                           <span>{referenceMetrics.nextSplit.bearingCompass}</span>
-                          <span className="text-[10px] font-mono text-slate-400">({Math.round(referenceMetrics.nextSplit.bearingDeg)}°)</span>
+                          <span className="text-[11px] font-mono text-slate-400">({Math.round(referenceMetrics.nextSplit.bearingDeg)}°)</span>
                         </div>
                       </div>
                     </div>
 
                     {/* Route Context: Distance to Finish & From Start */}
                     <div className="grid grid-cols-2 gap-2 text-xs">
-                      <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase block">Célig táv:</span>
-                        <span className="font-mono font-black text-indigo-700 text-sm leading-tight block mt-0.5">
+                      <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                        <span className="text-[11px] text-slate-400 font-bold uppercase block">Célig táv:</span>
+                        <span className="font-mono font-black text-indigo-700 text-base sm:text-lg leading-tight block mt-0.5">
                           {referenceMetrics.formattedDistanceToEnd}
                         </span>
                       </div>
-                      <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase block">Starttól:</span>
-                        <span className="font-mono font-bold text-slate-700 text-sm leading-tight block mt-0.5">
+                      <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                        <span className="text-[11px] text-slate-400 font-bold uppercase block">Starttól:</span>
+                        <span className="font-mono font-bold text-slate-700 text-base sm:text-lg leading-tight block mt-0.5">
                           {referenceMetrics.formattedDistanceFromStart}
                         </span>
                       </div>
                     </div>
 
-                    {/* Route Corridor Status & Speed (if tracking) */}
-                    <div className="pt-1.5 border-t border-slate-100 text-[10.5px] font-mono text-slate-600 flex items-center justify-between">
-                      <span className="flex items-center gap-1">
-                        <span className={`w-2 h-2 rounded-full ${referenceMetrics.isOnTrack ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                        <span className="font-sans font-bold text-[10px]">
-                          {referenceMetrics.isOnTrack ? 'Útvonalon' : `Eltérés: ±${referenceMetrics.crossTrackDistanceMeters}m`}
+                    {/* Route Corridor Status, Speed, and Slope Angle */}
+                    <div className="pt-2 border-t border-slate-100 flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between text-xs font-mono text-slate-600">
+                        <span className="flex items-center gap-1.5">
+                          <span className={`w-2 h-2 rounded-full ${referenceMetrics.isOnTrack ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                          <span className="font-sans font-bold text-xs">
+                            {referenceMetrics.isOnTrack ? 'Útvonalon' : `Eltérés: ±${referenceMetrics.crossTrackDistanceMeters}m`}
+                          </span>
                         </span>
-                      </span>
-                      {trackingStatus === 'running' ? (
-                        <span className="font-bold text-slate-700">
-                          {currentSpeedKmh} km/h • {formatElapsedTime(elapsedSeconds)}
+                        {trackingStatus === 'running' ? (
+                          <span className="font-bold text-slate-800">
+                            {currentSpeedKmh} km/h • {formatElapsedTime(elapsedSeconds)}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 font-sans text-xs">
+                            {loadedSession.totalDistanceKm.toFixed(1)} km össztáv
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Live Slope in reference track mode */}
+                      <div className={`px-2 py-1.5 rounded-lg border flex items-center justify-between text-xs ${
+                        slopeMetrics.direction === 'up'
+                          ? 'bg-emerald-50/90 border-emerald-200 text-emerald-900'
+                          : slopeMetrics.direction === 'down'
+                          ? 'bg-blue-50/90 border-blue-200 text-blue-900'
+                          : 'bg-slate-50 border-slate-200 text-slate-700'
+                      }`}>
+                        <span className="font-bold flex items-center gap-1">
+                          <Mountain className="w-3.5 h-3.5 text-[#0050cb]" />
+                          <span>Lejtés / Emelkedés:</span>
                         </span>
-                      ) : (
-                        <span className="text-slate-400 font-sans text-[10px]">
-                          {loadedSession.totalDistanceKm.toFixed(1)} km össztáv
-                        </span>
-                      )}
+                        <div className="flex items-center gap-1.5 font-mono font-black">
+                          <span>{slopeMetrics.direction === 'up' ? '▲' : slopeMetrics.direction === 'down' ? '▼' : '─'} {slopeMetrics.formattedAngle}</span>
+                          <span className="text-[11px] font-bold text-slate-500">({slopeMetrics.formattedGrade})</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-2 space-y-2">
-                    {/* Time and Distance Primary Metrics */}
+                  <div className="mt-2.5 space-y-2.5">
+                    {/* Time and Distance Primary Metrics with larger typography */}
                     <div className="grid grid-cols-2 gap-2">
-                      <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                        <div className="text-[10px] font-bold text-slate-400 uppercase">Össz. Idő</div>
-                        <div className="text-base font-black font-mono text-slate-800 leading-tight mt-0.5">
+                      <div className="bg-slate-50/90 p-2.5 rounded-xl border border-slate-200/80 shadow-2xs">
+                        <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-slate-400" />
+                          <span>Össz. Idő</span>
+                        </div>
+                        <div className="text-xl sm:text-2xl font-black font-mono text-slate-900 leading-tight mt-1">
                           {formatElapsedTime(elapsedSeconds)}
                         </div>
                       </div>
 
-                      <div className="bg-slate-50 p-2 rounded-xl border border-slate-100">
-                        <div className="text-[10px] font-bold text-slate-400 uppercase">Távolság</div>
-                        <div className="text-base font-black font-mono text-[#0050cb] leading-tight mt-0.5">
-                          {formattedDistance.value} <span className="text-xs font-bold text-slate-500">{formattedDistance.unitLabel}</span>
+                      <div className="bg-blue-50/60 p-2.5 rounded-xl border border-blue-100 shadow-2xs">
+                        <div className="text-[11px] font-bold text-blue-600 uppercase tracking-wider flex items-center gap-1">
+                          <Navigation className="w-3 h-3 text-[#0050cb]" />
+                          <span>Távolság</span>
+                        </div>
+                        <div className="text-xl sm:text-2xl font-black font-mono text-[#0050cb] leading-tight mt-1 flex items-baseline gap-1">
+                          <span>{formattedDistance.value}</span>
+                          <span className="text-sm font-bold text-slate-500">{formattedDistance.unitLabel}</span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Speed & Current Split Metrics */}
-                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 text-xs">
+                    {/* Speed & Current Split Metrics with larger numbers */}
+                    <div className="grid grid-cols-2 gap-2 bg-slate-50/80 p-2.5 rounded-xl border border-slate-200/80">
                       <div>
-                        <span className="text-[10px] text-slate-400 font-bold block">Sebesség:</span>
-                        <span className="font-mono font-black text-slate-700">{currentSpeedKmh} km/h</span>
+                        <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider flex items-center gap-1">
+                          <Gauge className="w-3 h-3 text-slate-400" />
+                          <span>Sebesség</span>
+                        </span>
+                        <div className="text-lg sm:text-xl font-black font-mono text-slate-900 leading-tight mt-0.5">
+                          {currentSpeedKmh} <span className="text-xs font-bold text-slate-500">km/h</span>
+                        </div>
                       </div>
                       <div>
-                        <span className="text-[10px] text-slate-400 font-bold block">Akt. szakasz:</span>
-                        <span className="font-mono font-bold text-slate-700">{formattedSplitDist.value} {formattedSplitDist.unitLabel}</span>
+                        <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider flex items-center gap-1">
+                          <Flag className="w-3 h-3 text-slate-400" />
+                          <span>Akt. szakasz</span>
+                        </span>
+                        <div className="text-lg sm:text-xl font-black font-mono text-slate-900 leading-tight mt-0.5 flex items-baseline gap-1">
+                          <span>{formattedSplitDist.value}</span>
+                          <span className="text-xs font-bold text-slate-500">{formattedSplitDist.unitLabel}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Live Slope & Grade Incline/Decline Box (Lejtmenet / Felfelé menet szög) */}
+                    <div className={`p-2.5 rounded-xl border transition-all ${
+                      slopeMetrics.direction === 'up'
+                        ? 'bg-gradient-to-br from-emerald-50 via-teal-50/80 to-emerald-50 border-emerald-300/80 shadow-2xs'
+                        : slopeMetrics.direction === 'down'
+                        ? 'bg-gradient-to-br from-sky-50 via-blue-50/80 to-sky-50 border-blue-300/80 shadow-2xs'
+                        : 'bg-slate-50/90 border-slate-200/80'
+                    }`}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-slate-700">
+                          <Mountain className="w-3.5 h-3.5 text-[#0050cb]" />
+                          <span>Lejtés / Emelkedő szög</span>
+                        </div>
+                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                          slopeMetrics.direction === 'up'
+                            ? 'bg-emerald-200/90 text-emerald-900 border border-emerald-300'
+                            : slopeMetrics.direction === 'down'
+                            ? 'bg-blue-200/90 text-blue-900 border border-blue-300'
+                            : 'bg-slate-200 text-slate-700'
+                        }`}>
+                          {slopeMetrics.direction === 'up' && <TrendingUp className="w-3 h-3 stroke-[3]" />}
+                          {slopeMetrics.direction === 'down' && <TrendingDown className="w-3 h-3 stroke-[3]" />}
+                          {slopeMetrics.direction === 'flat' && <Minus className="w-3 h-3 stroke-[3]" />}
+                          <span>{slopeMetrics.shortLabel}</span>
+                        </span>
+                      </div>
+
+                      <div className="flex items-baseline justify-between mt-1.5">
+                        <div className="flex items-baseline gap-1.5">
+                          <span className={`text-2xl sm:text-3xl font-black font-mono tracking-tight leading-none ${
+                            slopeMetrics.direction === 'up'
+                              ? 'text-emerald-700'
+                              : slopeMetrics.direction === 'down'
+                              ? 'text-blue-700'
+                              : 'text-slate-800'
+                          }`}>
+                            {slopeMetrics.formattedAngle}
+                          </span>
+                          <span className="text-xs sm:text-sm font-bold text-slate-500 font-mono">
+                            ({slopeMetrics.formattedGrade})
+                          </span>
+                        </div>
+
+                        <div className="text-right">
+                          <div className="text-[10px] font-bold text-slate-400 uppercase">Magasság</div>
+                          <div className="text-sm sm:text-base font-black font-mono text-slate-800 leading-tight">
+                            {slopeMetrics.altitudeMeters != null ? `${slopeMetrics.altitudeMeters} m` : '---'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-[10px] text-slate-500 font-medium mt-1.5 pt-1 border-t border-slate-200/60 flex items-center justify-between">
+                        <span>{slopeMetrics.label}</span>
+                        {slopeMetrics.horizontalDistanceMeters > 0 && (
+                          <span className="font-mono">({slopeMetrics.horizontalDistanceMeters}m bázis)</span>
+                        )}
                       </div>
                     </div>
 
                     {/* GPS Coordinates preview */}
-                    <div className="pt-1.5 border-t border-slate-100 text-[10px] font-mono text-slate-500 flex items-center justify-between">
-                      <span>Pontok: <b>{coordinates.length}</b></span>
-                      <span>Splitek: <b>{splits.length}</b></span>
+                    <div className="pt-1.5 border-t border-slate-200 text-xs font-mono text-slate-600 flex items-center justify-between">
+                      <span>Pontok: <b className="text-slate-800">{coordinates.length}</b></span>
+                      <span>Splitek: <b className="text-slate-800">{splits.length}</b></span>
+                      <span>GPS: <b className="text-slate-800">±{currentLocation?.accuracy ? Math.round(currentLocation.accuracy) : 5}m</b></span>
                     </div>
                   </div>
                 )}
@@ -561,34 +685,35 @@ export const MapsView: React.FC<MapsViewProps> = ({
               <div className="w-full flex items-center gap-2">
                 {/* Stop / Finish Button */}
                 <button
+                  id="btn-maps-stop"
                   type="button"
                   onClick={() => setShowStopConfirm(true)}
-                  className="px-3.5 py-3 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-90 cursor-pointer shadow-2xs flex-shrink-0"
+                  className="px-3 sm:px-3.5 py-3 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-90 cursor-pointer shadow-2xs flex-shrink-0"
                   title="Rögzítés befejezése és mentése"
                 >
                   <Square className="w-4 h-4 fill-current text-red-600" />
-                  <span className="hidden sm:inline">Befejezés</span>
+                  <span className="font-bold">Befejezés</span>
                 </button>
 
                 {/* Pause Button */}
                 <button
                   type="button"
                   onClick={onPause}
-                  className="px-3.5 py-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-90 cursor-pointer shadow-2xs flex-shrink-0"
+                  className="px-3 sm:px-3.5 py-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-90 cursor-pointer shadow-2xs flex-shrink-0"
                   title="Rögzítés szüneteltetése"
                 >
                   <Pause className="w-4 h-4 fill-current text-amber-600" />
-                  <span className="hidden sm:inline">Szünet</span>
+                  <span className="font-bold">Szünet</span>
                 </button>
 
                 {/* BIG PROMINENT RALLY SPLIT / CHECKPOINT BUTTON */}
                 <button
                   type="button"
                   onClick={() => onSplit()}
-                  className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-[#0050cb] via-blue-600 to-[#0066ff] hover:from-blue-700 hover:to-blue-600 text-white font-black text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-blue-500/30 transition-all active:scale-95 cursor-pointer ring-2 ring-blue-400/30"
+                  className="flex-1 py-3 px-3 sm:px-4 rounded-xl bg-gradient-to-r from-[#0050cb] via-blue-600 to-[#0066ff] hover:from-blue-700 hover:to-blue-600 text-white font-black text-xs sm:text-base flex items-center justify-center gap-1.5 sm:gap-2 shadow-lg shadow-blue-500/30 transition-all active:scale-95 cursor-pointer ring-2 ring-blue-400/30 min-w-0 truncate"
                 >
-                  <Flag className="w-5 h-5 fill-current" />
-                  <span>RÉSZTÁV / ÚTPONT ({splits.length + 1})</span>
+                  <Flag className="w-4 h-4 sm:w-5 sm:h-5 fill-current shrink-0" />
+                  <span className="truncate">RÉSZTÁV ({splits.length + 1})</span>
                 </button>
               </div>
             ) : (
@@ -596,34 +721,35 @@ export const MapsView: React.FC<MapsViewProps> = ({
               <div className="w-full flex items-center gap-2">
                 {/* Stop / Finish Button */}
                 <button
+                  id="btn-maps-stop-paused"
                   type="button"
                   onClick={() => setShowStopConfirm(true)}
-                  className="px-3.5 py-3 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-90 cursor-pointer shadow-2xs flex-shrink-0"
+                  className="px-3 sm:px-3.5 py-3 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-90 cursor-pointer shadow-2xs flex-shrink-0"
                   title="Rögzítés befejezése és mentése"
                 >
                   <Square className="w-4 h-4 fill-current text-red-600" />
-                  <span>Befejezés</span>
+                  <span className="font-bold">Befejezés</span>
                 </button>
 
                 {/* Split even while paused */}
                 <button
                   type="button"
                   onClick={() => onSplit()}
-                  className="px-3.5 py-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#0050cb] border border-blue-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-90 cursor-pointer shadow-2xs flex-shrink-0"
+                  className="px-3 sm:px-3.5 py-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#0050cb] border border-blue-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-all active:scale-90 cursor-pointer shadow-2xs flex-shrink-0"
                   title="Útpont rögzítése a jelenlegi pozíción"
                 >
                   <Flag className="w-4 h-4" />
-                  <span>Útpont</span>
+                  <span className="font-bold">Útpont</span>
                 </button>
 
                 {/* Big Glowing Resume Button */}
                 <button
                   type="button"
                   onClick={onResume}
-                  className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-sm sm:text-base flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30 transition-all active:scale-95 cursor-pointer animate-pulse ring-2 ring-emerald-400/40"
+                  className="flex-1 py-3 px-3 sm:px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-xs sm:text-base flex items-center justify-center gap-1.5 sm:gap-2 shadow-lg shadow-emerald-500/30 transition-all active:scale-95 cursor-pointer animate-pulse ring-2 ring-emerald-400/40 min-w-0 truncate"
                 >
-                  <Play className="w-5 h-5 fill-current" />
-                  <span>FOLYTATÁS</span>
+                  <Play className="w-4 h-4 sm:w-5 sm:h-5 fill-current shrink-0" />
+                  <span className="truncate">FOLYTATÁS</span>
                 </button>
               </div>
             )}
@@ -633,8 +759,14 @@ export const MapsView: React.FC<MapsViewProps> = ({
 
       {/* Stop / Finish Confirmation Modal */}
       {showStopConfirm && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-white rounded-3xl p-5 max-w-sm w-full shadow-2xl border border-slate-100 space-y-4">
+        <div
+          className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in"
+          onClick={() => setShowStopConfirm(false)}
+        >
+          <div
+            className="bg-white rounded-3xl p-5 max-w-sm w-full shadow-2xl border border-slate-100 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center gap-3">
               <div className="p-3 bg-red-100 text-red-600 rounded-2xl">
                 <Square className="w-6 h-6 fill-current" />
@@ -669,6 +801,7 @@ export const MapsView: React.FC<MapsViewProps> = ({
                 Mégse
               </button>
               <button
+                id="btn-maps-confirm-save"
                 type="button"
                 onClick={() => {
                   setShowStopConfirm(false);
