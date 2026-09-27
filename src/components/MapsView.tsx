@@ -399,12 +399,14 @@ export const MapsView: React.FC<MapsViewProps> = ({
                           ? 'bg-blue-50/90 border-blue-200 text-blue-900'
                           : 'bg-slate-50 border-slate-200 text-slate-700'
                       }`}>
-                        <span className="font-bold flex items-center gap-1">
-                          <Mountain className="w-3.5 h-3.5 text-[#0050cb]" />
-                          <span>Lejtés / Emelkedés:</span>
+                        <span className="font-bold flex items-center gap-1.5">
+                          <span>Meredekség</span>
+                          {slopeMetrics.direction === 'up' && <TrendingUp className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />}
+                          {slopeMetrics.direction === 'down' && <TrendingDown className="w-3.5 h-3.5 text-blue-600 stroke-[3]" />}
+                          {slopeMetrics.direction === 'flat' && <Minus className="w-3.5 h-3.5 text-slate-400 stroke-[3]" />}
                         </span>
                         <div className="flex items-center gap-1.5 font-mono font-black">
-                          <span>{slopeMetrics.direction === 'up' ? '▲' : slopeMetrics.direction === 'down' ? '▼' : '─'} {slopeMetrics.formattedAngle}</span>
+                          <span>{slopeMetrics.formattedAngle}</span>
                           <span className="text-[11px] font-bold text-slate-500">({slopeMetrics.formattedGrade})</span>
                         </div>
                       </div>
@@ -459,8 +461,8 @@ export const MapsView: React.FC<MapsViewProps> = ({
                       </div>
                     </div>
 
-                    {/* Live Slope & Grade Incline/Decline Box (Lejtmenet / Felfelé menet szög) */}
-                    <div className={`p-2.5 rounded-xl border transition-all ${
+                    {/* Live Slope Box */}
+                    <div className={`p-2 sm:p-2.5 rounded-xl border transition-all ${
                       slopeMetrics.direction === 'up'
                         ? 'bg-gradient-to-br from-emerald-50 via-teal-50/80 to-emerald-50 border-emerald-300/80 shadow-2xs'
                         : slopeMetrics.direction === 'down'
@@ -468,25 +470,26 @@ export const MapsView: React.FC<MapsViewProps> = ({
                         : 'bg-slate-50/90 border-slate-200/80'
                     }`}>
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider text-slate-700">
-                          <Mountain className="w-3.5 h-3.5 text-[#0050cb]" />
-                          <span>Lejtés / Emelkedő szög</span>
+                        <div className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-slate-700">
+                          <span>Meredekség</span>
+                          {slopeMetrics.direction === 'up' && <TrendingUp className="w-4 h-4 text-emerald-600 stroke-[3]" />}
+                          {slopeMetrics.direction === 'down' && <TrendingDown className="w-4 h-4 text-blue-600 stroke-[3]" />}
+                          {slopeMetrics.direction === 'flat' && <Minus className="w-4 h-4 text-slate-400 stroke-[3]" />}
                         </div>
-                        <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                        <span className={`p-1 rounded-full flex items-center justify-center ${
                           slopeMetrics.direction === 'up'
                             ? 'bg-emerald-200/90 text-emerald-900 border border-emerald-300'
                             : slopeMetrics.direction === 'down'
                             ? 'bg-blue-200/90 text-blue-900 border border-blue-300'
                             : 'bg-slate-200 text-slate-700'
                         }`}>
-                          {slopeMetrics.direction === 'up' && <TrendingUp className="w-3 h-3 stroke-[3]" />}
-                          {slopeMetrics.direction === 'down' && <TrendingDown className="w-3 h-3 stroke-[3]" />}
-                          {slopeMetrics.direction === 'flat' && <Minus className="w-3 h-3 stroke-[3]" />}
-                          <span>{slopeMetrics.shortLabel}</span>
+                          {slopeMetrics.direction === 'up' && <ArrowUpRight className="w-3.5 h-3.5 stroke-[2.5]" />}
+                          {slopeMetrics.direction === 'down' && <ArrowDownRight className="w-3.5 h-3.5 stroke-[2.5]" />}
+                          {slopeMetrics.direction === 'flat' && <Minus className="w-3.5 h-3.5 stroke-[2.5]" />}
                         </span>
                       </div>
 
-                      <div className="flex items-baseline justify-between mt-1.5">
+                      <div className="flex items-baseline justify-between mt-1">
                         <div className="flex items-baseline gap-1.5">
                           <span className={`text-2xl sm:text-3xl font-black font-mono tracking-tight leading-none ${
                             slopeMetrics.direction === 'up'
@@ -508,13 +511,6 @@ export const MapsView: React.FC<MapsViewProps> = ({
                             {slopeMetrics.altitudeMeters != null ? `${slopeMetrics.altitudeMeters} m` : '---'}
                           </div>
                         </div>
-                      </div>
-
-                      <div className="text-[10px] text-slate-500 font-medium mt-1.5 pt-1 border-t border-slate-200/60 flex items-center justify-between">
-                        <span>{slopeMetrics.label}</span>
-                        {slopeMetrics.horizontalDistanceMeters > 0 && (
-                          <span className="font-mono">({slopeMetrics.horizontalDistanceMeters}m bázis)</span>
-                        )}
                       </div>
                     </div>
 
