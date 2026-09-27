@@ -134,10 +134,41 @@ export const MapsView: React.FC<MapsViewProps> = ({
     return 0;
   }, [currentLocation, elapsedSeconds, totalDistanceKm]);
 
+  // Rolling GPS buffer to supply trajectory baseline when tracking has just started or is in standby
+  const recentGpsBufferRef = useRef<Coordinate[]>([]);
+  useEffect(() => {
+    if (currentLocation && typeof currentLocation.lat === 'number' && typeof currentLocation.lng === 'number') {
+      const buf = recentGpsBufferRef.current;
+      const last = buf[buf.length - 1];
+      if (!last || last.lat !== currentLocation.lat || last.lng !== currentLocation.lng) {
+        recentGpsBufferRef.current = [...buf.slice(-60), currentLocation];
+      }
+    }
+  }, [currentLocation]);
+
+  // Track coordinates for slope calculation: prioritize recorded route (coordinates)
+  // but backfill with recent GPS buffer if recorded points are still few (< 8 points)
+  const trackForSlope = useMemo(() => {
+    if (coordinates && coordinates.length >= 8) {
+      return coordinates;
+    }
+    const buf = recentGpsBufferRef.current;
+    if (coordinates && coordinates.length > 0) {
+      const merged = [...buf];
+      for (const pt of coordinates) {
+        if (!merged.some((m) => m.timestamp && pt.timestamp && m.timestamp === pt.timestamp)) {
+          merged.push(pt);
+        }
+      }
+      return merged;
+    }
+    return buf;
+  }, [coordinates, currentLocation]);
+
   // Slope / Incline / Grade calculation (Lejtmenet / Felfelé menet szög és meredekség)
   const slopeMetrics: SlopeMetrics = useMemo(() => {
-    return calculateSlopeMetrics(currentLocation, coordinates, currentSpeedKmh);
-  }, [currentLocation, coordinates, currentSpeedKmh]);
+    return calculateSlopeMetrics(currentLocation, trackForSlope, currentSpeedKmh);
+  }, [currentLocation, trackForSlope, currentSpeedKmh]);
 
   // Formatted main distance
   const formattedDistance = formatDistanceByUnit(totalDistanceKm, settings.unit);
