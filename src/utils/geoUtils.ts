@@ -261,20 +261,21 @@ export interface SlopeMetrics {
 }
 
 /**
- * 5-point median filter to completely eliminate GPS altitude spikes/outliers
+ * 3-point or 5-point moving median filter to eliminate individual GPS altitude glitches
  */
-function medianFilter5(values: number[]): number[] {
+function medianFilter(values: number[]): number[] {
   const n = values.length;
   if (n <= 2) return values.slice();
   const res: number[] = [];
+  const radius = n >= 5 ? 2 : 1;
   for (let i = 0; i < n; i++) {
     const win: number[] = [];
-    for (let offset = -2; offset <= 2; offset++) {
+    for (let offset = -radius; offset <= radius; offset++) {
       const idx = Math.max(0, Math.min(n - 1, i + offset));
       win.push(values[idx]);
     }
     win.sort((a, b) => a - b);
-    res.push(win[2]);
+    res.push(win[Math.floor(win.length / 2)]);
   }
   return res;
 }
@@ -283,17 +284,18 @@ function medianFilter5(values: number[]): number[] {
  * Calculates current slope / grade / angle of incline or decline based on GPS position,
  * distance, speed, and elevation data from the recorded route so far.
  *
- * Implements a robust multi-stage pipeline:
- * 1. Collects a speed-adaptive window (65m - 145m) along the recorded track trajectory.
- * 2. Rate-limits single-leg altitude jumps to physical limits (<= 25% gradient per leg).
- * 3. 5-point moving median filter: cleanly strips out single-fix GPS altitude spikes.
- * 4. Ordinary Least Squares (OLS) Linear Regression: calculates optimal slope (rise / run).
- * 5. Goodness-of-fit (R² correlation) confidence damping: if altitude fluctuates erratically
- *    without a consistent slope trend, dampens the angle toward 0.0° to eliminate false hills.
- * 6. Stationary & low-speed lock: locks to 0.0° / Sík terep when stationary (<1.5 km/h).
- * 7. Physical limits clamp: strictly limits incline to ±12.5° (approx ±22% grade), preventing
- *    any unrealistic extreme values (e.g. 18°–22°) from ever appearing on the live dashboard.
- * 8. Deadband snap: snaps small gradients (|angle| < 0.6°, |grade| < 1.0%) to 0.0° / Sík terep.
+ * NEW ROBUST METHOD:
+ * 1. Extracts recent trajectory window along the route (target 25m - 90m depending on speed, min 12m).
+ * 2. Rate-limits single-leg vertical jumps (clamps spurious jumps > 3.0m over short distances).
+ * 3. Moving median filter: eliminates single-fix GPS altitude spikes.
+ * 4. Distance-weighted exponential low-pass filter (tau ~ 10m): strips high-frequency jitter
+ *    while preserving true uphill / downhill elevation trends.
+ * 5. Multi-baseline gradient: combines trend regression (rise/run) with endpoint elevation delta,
+ *    eliminating the fragile R² suppression that previously crushed real slopes to flat.
+ * 6. Truly stationary detection: triggers ONLY when truly stationary (speed < 1.2 km/h and distance < 1.8m).
+ * 7. Physical boundary clamp: limits slope to realistic range (max ±20% grade / ±11.5° angle),
+ *    permanently preventing extreme values.
+ * 8. Clean deadband: ±0.5° (±0.9% grade) for rock-solid stability on flat roads without micro-jitter.
  */
 export function calculateSlopeMetrics(
   currentLocation: Coordinate | null,
@@ -317,10 +319,15 @@ export function calculateSlopeMetrics(
   const rawList = Array.isArray(coordinates) ? coordinates : [];
   const track: Coordinate[] = [...rawList];
 
-  // If currentLocation is available, append it as the newest fix if not already present
+  // If currentLocation is available, append it as the newest fix if not identical to the last point
   if (currentLocation && typeof currentLocation.lat === 'number' && typeof currentLocation.lng === 'number') {
     const last = track[track.length - 1];
-    if (!last || last.lat !== currentLocation.lat || last.lng !== currentLocation.lng) {
+    if (
+      !last ||
+      last.lat !== currentLocation.lat ||
+      last.lng !== currentLocation.lng ||
+      (currentLocation.altitude != null && last.altitude !== currentLocation.altitude)
+    ) {
       track.push(currentLocation);
     }
   }
@@ -344,23 +351,12 @@ export function calculateSlopeMetrics(
     };
   }
 
-  // Stationary lock: when stopped (< 1.5 km/h), GPS horizontal/vertical drift
-  // creates artificial slopes. Always report 0.0° / Álló helyzet.
-  if (currentSpeedKmh < 1.5) {
-    return {
-      ...defaultMetrics,
-      altitudeMeters: Math.round(latestAlt),
-      hasAltitudeData: true,
-      label: 'Álló helyzet (0.0°)',
-      shortLabel: 'Álló helyzet',
-    };
-  }
-
-  // Adaptive baseline distance along the recorded route:
-  // Requires at least 35m - 75m to overcome typical GPS vertical accuracy jitter (±5-10m).
-  const targetWindowMeters = Math.max(65, Math.min(145, currentSpeedKmh * 2.8));
-  const minRequiredMeters = Math.max(35, Math.min(75, currentSpeedKmh * 1.5));
-  const maxPointsToCollect = 50;
+  // Adaptive baseline distance along the route:
+  // For walking / low speed (2-8 km/h): window is 25m - 40m
+  // For driving / cycling (20-80 km/h): window is 45m - 90m
+  const targetWindowMeters = Math.max(30, Math.min(95, currentSpeedKmh * 1.8));
+  const minRequiredMeters = Math.max(12, Math.min(30, currentSpeedKmh * 0.7));
+  const maxPointsToCollect = 45;
 
   interface WindowLeg {
     coord: Coordinate;
@@ -375,25 +371,39 @@ export function calculateSlopeMetrics(
     const prevPt = track[i - 1];
     const legM = calculateDistance(prevPt.lat, prevPt.lng, currPt.lat, currPt.lng) * 1000;
 
-    // Skip duplicate GPS points (distance < 0.2m)
-    if (legM < 0.2) continue;
+    // Skip duplicate GPS points (distance < 0.15m)
+    if (legM < 0.15) continue;
 
     accumulatedDistMeters += legM;
     collectedLegsRev.push({ coord: currPt, legDistMeters: legM });
 
-    if (collectedLegsRev.length >= maxPointsToCollect || (accumulatedDistMeters >= targetWindowMeters && collectedLegsRev.length >= 6)) {
+    if (
+      collectedLegsRev.length >= maxPointsToCollect ||
+      (accumulatedDistMeters >= targetWindowMeters && collectedLegsRev.length >= 5)
+    ) {
       collectedLegsRev.push({ coord: prevPt, legDistMeters: 0 });
       break;
     }
   }
 
-  // If the window reached the start of track without early exit, include the starting point
-  if (collectedLegsRev.length > 0 && !collectedLegsRev.some(l => l.coord === track[0])) {
+  if (collectedLegsRev.length > 0 && !collectedLegsRev.some((l) => l.coord === track[0])) {
     collectedLegsRev.push({ coord: track[0], legDistMeters: 0 });
   }
 
-  // If total distance along recorded track is under minRequiredMeters,
-  // slope cannot be determined reliably without extreme noise. Return flat.
+  // Truly stationary detection:
+  // Speed is < 1.2 km/h AND traversed distance in window is < 1.8m
+  if (currentSpeedKmh < 1.2 && accumulatedDistMeters < 1.8) {
+    return {
+      ...defaultMetrics,
+      altitudeMeters: Math.round(latestAlt),
+      hasAltitudeData: true,
+      horizontalDistanceMeters: Math.round(accumulatedDistMeters),
+      label: 'Álló helyzet (0.0°)',
+      shortLabel: 'Álló helyzet',
+    };
+  }
+
+  // If total distance along recorded track is under minRequiredMeters, return flat
   if (accumulatedDistMeters < minRequiredMeters) {
     return {
       ...defaultMetrics,
@@ -426,7 +436,7 @@ export function calculateSlopeMetrics(
     }
   }
 
-  if (validPoints.length < 4) {
+  if (validPoints.length < 3) {
     return {
       ...defaultMetrics,
       altitudeMeters: Math.round(latestAlt),
@@ -435,94 +445,82 @@ export function calculateSlopeMetrics(
     };
   }
 
-  // Step 1: Altitude jump rate-limiter:
-  // Clamp any leg vertical delta to physically possible gradients (max 25% = 0.25 m/m)
+  // Step 1: Clamp excessive single-step jumps (max 3.0m or 25% gradient per leg)
   const rateLimitedAlts: number[] = [validPoints[0].alt];
   for (let i = 1; i < validPoints.length; i++) {
     const legDist = Math.max(0.5, validPoints[i].dist - validPoints[i - 1].dist);
-    const maxDelta = Math.max(2.5, legDist * 0.25);
+    const maxDelta = Math.max(3.0, legDist * 0.25);
     const rawDelta = validPoints[i].alt - rateLimitedAlts[i - 1];
     const clampedDelta = Math.max(-maxDelta, Math.min(maxDelta, rawDelta));
     rateLimitedAlts.push(rateLimitedAlts[i - 1] + clampedDelta);
   }
 
-  // Step 2: 5-point moving median filter to eliminate impulse spikes
-  const smoothedAlts = medianFilter5(rateLimitedAlts);
+  // Step 2: Moving median filter to eliminate GPS multipath impulses
+  const medianAlts = medianFilter(rateLimitedAlts);
 
-  // Step 3: Ordinary Least Squares (OLS) Regression: alt = slope * dist + c
+  // Step 3: Distance-weighted low-pass filter (exponential moving average along distance)
+  // Distance constant tau = 10m filters high-frequency noise while smoothly tracking true slopes
+  const smoothedAlts: number[] = [medianAlts[0]];
+  for (let i = 1; i < medianAlts.length; i++) {
+    const dx = Math.max(0.2, validPoints[i].dist - validPoints[i - 1].dist);
+    const alpha = 1 - Math.exp(-dx / 10);
+    const prev = smoothedAlts[i - 1];
+    smoothedAlts.push(prev + alpha * (medianAlts[i] - prev));
+  }
+
+  // Step 4: Multi-baseline Slope Computation
   const N = validPoints.length;
+  const startPt = validPoints[0];
+  const endPt = validPoints[N - 1];
+  const totalWindowDist = Math.max(1.0, endPt.dist - startPt.dist);
+  const totalElevationDelta = smoothedAlts[N - 1] - smoothedAlts[0];
+
+  // A) Endpoint rise / run slope
+  const endpointSlope = totalElevationDelta / totalWindowDist;
+
+  // B) Linear regression slope over the window: alt = slope * dist + c
   let sumX = 0;
   let sumY = 0;
-
   for (let i = 0; i < N; i++) {
     sumX += validPoints[i].dist;
     sumY += smoothedAlts[i];
   }
-
   const meanX = sumX / N;
   const meanY = sumY / N;
 
   let covXY = 0;
   let varX = 0;
-  let varY = 0;
-
   for (let i = 0; i < N; i++) {
     const dx = validPoints[i].dist - meanX;
     const dy = smoothedAlts[i] - meanY;
     covXY += dx * dy;
     varX += dx * dx;
-    varY += dy * dy;
   }
 
-  // If variance in distance is negligible, return flat
-  if (varX < 2.0) {
-    return {
-      ...defaultMetrics,
-      altitudeMeters: Math.round(latestAlt),
-      hasAltitudeData: true,
-      horizontalDistanceMeters: Math.round(runningDist),
-    };
+  const regressionSlope = varX > 1.0 ? covXY / varX : endpointSlope;
+
+  // Blended slope: 60% regression trend + 40% endpoint rise/run
+  let slope = 0.6 * regressionSlope + 0.4 * endpointSlope;
+
+  // Smooth micro-noise damping:
+  // If absolute elevation change in window is very small (< 0.6m), scale slope proportionally
+  // so that random ±0.2m noise doesn't show false slopes, but real climbs immediately register!
+  const absDelta = Math.abs(totalElevationDelta);
+  if (absDelta < 0.6) {
+    slope *= Math.max(0, absDelta / 0.6);
   }
 
-  // Fitted slope (rise / run)
-  let slope = covXY / varX;
-
-  // Goodness-of-fit R² correlation damping:
-  // If altitude is fluctuating randomly with no consistent trend, damp slope to 0
-  if (varY > 0.01) {
-    const r2 = (covXY * covXY) / (varX * varY);
-    const confidence = Math.max(0, Math.min(1.0, (r2 - 0.15) / 0.45));
-    slope *= confidence;
-  }
-
-  // Flatness check: if vertical variation in window is under 1.2m, damp toward flat
-  const elevationStdDev = Math.sqrt(varY / N);
-  if (elevationStdDev < 1.2) {
-    const flatnessFactor = Math.max(0, (elevationStdDev - 0.3) / 0.9);
-    slope *= flatnessFactor;
-  }
-
-  // Grade in percent = slope * 100
+  // Step 5: Convert to Grade % and Incline Angle (degrees)
   let gradePercent = slope * 100;
-  // Incline angle in degrees = arctan(slope) * (180 / PI)
   let angleDeg = (Math.atan(slope) * 180) / Math.PI;
 
-  // Physical limits for roads and paths:
-  // Strict clamp to realistic road inclines: max ±12.5° (approx ±22% grade).
-  // Eliminates extreme values (18°–22°+) completely.
-  gradePercent = Math.max(-22, Math.min(22, gradePercent));
-  angleDeg = Math.max(-12.5, Math.min(12.5, angleDeg));
+  // Strict physical clamp to realistic road limits (max ±20% grade, max ±11.5° angle)
+  // This completely eliminates any extreme values (e.g. 15°–22°)
+  gradePercent = Math.max(-20, Math.min(20, gradePercent));
+  angleDeg = Math.max(-11.5, Math.min(11.5, angleDeg));
 
-  // Speed-based damping: if speed is slow (1.5 - 4.0 km/h)
-  if (currentSpeedKmh < 4.0) {
-    const factor = Math.max(0, (currentSpeedKmh - 1.5) / 2.5);
-    gradePercent *= factor;
-    angleDeg *= factor;
-  }
-
-  // Deadband threshold: if slope is very small (|grade| < 1.0% or |angle| < 0.6°),
-  // snap to 0 to prevent jitter on almost-flat ground
-  if (Math.abs(angleDeg) < 0.6 || Math.abs(gradePercent) < 1.0) {
+  // Deadband threshold: if angle is within ±0.5° (or grade within ±0.9%), consider flat
+  if (Math.abs(angleDeg) < 0.5 || Math.abs(gradePercent) < 0.9) {
     angleDeg = 0;
     gradePercent = 0;
   }
@@ -535,19 +533,20 @@ export function calculateSlopeMetrics(
   let label = 'Sík terep';
   let sign = '';
 
-  if (roundedAngle >= 0.6) {
+  if (roundedAngle >= 0.5) {
     direction = 'up';
     shortLabel = 'Felfelé menet';
     label = 'Felfelé menet';
     sign = '+';
-  } else if (roundedAngle <= -0.6) {
+  } else if (roundedAngle <= -0.5) {
     direction = 'down';
     shortLabel = 'Lejtmenet';
     label = 'Lejtmenet';
     sign = roundedAngle < 0 ? '' : '-';
   }
 
-  const totalElevationDelta = smoothedAlts[smoothedAlts.length - 1] - smoothedAlts[0];
+  const currentSmoothedAlt = smoothedAlts[smoothedAlts.length - 1];
+  const displayAlt = latestAlt != null ? Math.round(latestAlt) : Math.round(currentSmoothedAlt);
 
   return {
     angleDeg: roundedAngle,
@@ -557,9 +556,9 @@ export function calculateSlopeMetrics(
     shortLabel,
     formattedAngle: `${sign}${roundedAngle.toFixed(1)}°`,
     formattedGrade: `${roundedGrade > 0 ? '+' : ''}${roundedGrade}%`,
-    altitudeMeters: Math.round(latestAlt),
+    altitudeMeters: displayAlt,
     hasAltitudeData: true,
-    horizontalDistanceMeters: Math.round(runningDist),
+    horizontalDistanceMeters: Math.round(totalWindowDist),
     elevationDeltaMeters: Math.round(totalElevationDelta * 10) / 10,
   };
 }

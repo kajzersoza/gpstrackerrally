@@ -39,6 +39,7 @@ import {
   ReferenceTrackMetrics,
   calculateSlopeMetrics,
   SlopeMetrics,
+  calculateDistance,
 } from '../utils/geoUtils';
 import { DEFAULT_RALLY_PRESETS, getPresetIcon } from '../constants/rallyPresets';
 
@@ -123,47 +124,88 @@ export const MapsView: React.FC<MapsViewProps> = ({
     return calculateReferenceMetrics(currentLocation, loadedSession, settings.unit);
   }, [loadedSession, currentLocation, settings.unit]);
 
-  // Speed calculation
-  const currentSpeedKmh = useMemo(() => {
-    if (currentLocation?.speed != null && currentLocation.speed >= 0) {
-      return Math.round(currentLocation.speed * 3.6);
-    }
-    if (elapsedSeconds > 0 && totalDistanceKm > 0) {
-      return Math.round((totalDistanceKm / (elapsedSeconds / 3600)));
-    }
-    return 0;
-  }, [currentLocation, elapsedSeconds, totalDistanceKm]);
+  // Rolling GPS trail buffer: keeps track of recent GPS fixes continuously,
+  // guaranteeing a stable baseline even in standby or when workout has just started
+  const [recentGpsTrail, setRecentGpsTrail] = useState<Coordinate[]>([]);
+  const lastBufferedLocRef = useRef<{ lat: number; lng: number; alt: number | null } | null>(null);
 
-  // Rolling GPS buffer to supply trajectory baseline when tracking has just started or is in standby
-  const recentGpsBufferRef = useRef<Coordinate[]>([]);
   useEffect(() => {
     if (currentLocation && typeof currentLocation.lat === 'number' && typeof currentLocation.lng === 'number') {
-      const buf = recentGpsBufferRef.current;
-      const last = buf[buf.length - 1];
-      if (!last || last.lat !== currentLocation.lat || last.lng !== currentLocation.lng) {
-        recentGpsBufferRef.current = [...buf.slice(-60), currentLocation];
+      const last = lastBufferedLocRef.current;
+      if (
+        !last ||
+        last.lat !== currentLocation.lat ||
+        last.lng !== currentLocation.lng ||
+        last.alt !== (currentLocation.altitude ?? null)
+      ) {
+        lastBufferedLocRef.current = {
+          lat: currentLocation.lat,
+          lng: currentLocation.lng,
+          alt: currentLocation.altitude ?? null,
+        };
+        setRecentGpsTrail((prev) => {
+          const next = [...prev.slice(-60), currentLocation];
+          return next;
+        });
       }
     }
   }, [currentLocation]);
 
-  // Track coordinates for slope calculation: prioritize recorded route (coordinates)
-  // but backfill with recent GPS buffer if recorded points are still few (< 8 points)
-  const trackForSlope = useMemo(() => {
-    if (coordinates && coordinates.length >= 8) {
-      return coordinates;
+  // Speed calculation: uses direct hardware speed if available, or dynamically derives speed
+  // from recent GPS trail points (over last 2-5 seconds). Fallback to session average.
+  const currentSpeedKmh = useMemo(() => {
+    // 1. Direct hardware speed if reported and valid
+    if (currentLocation?.speed != null && currentLocation.speed >= 0 && !isNaN(currentLocation.speed)) {
+      return Math.round(currentLocation.speed * 3.6);
     }
-    const buf = recentGpsBufferRef.current;
-    if (coordinates && coordinates.length > 0) {
-      const merged = [...buf];
-      for (const pt of coordinates) {
-        if (!merged.some((m) => m.timestamp && pt.timestamp && m.timestamp === pt.timestamp)) {
-          merged.push(pt);
+    // 2. Real-time speed computed from recent GPS trail points (last 2-5 seconds)
+    const trail = coordinates && coordinates.length >= 2 ? coordinates : recentGpsTrail;
+    if (trail.length >= 2) {
+      const pLatest = trail[trail.length - 1];
+      let pEarlier = trail[0];
+      for (let i = trail.length - 2; i >= 0; i--) {
+        const dt = (pLatest.timestamp && trail[i].timestamp) ? (pLatest.timestamp - trail[i].timestamp) / 1000 : 0;
+        if (dt >= 2.0) {
+          pEarlier = trail[i];
+          break;
         }
       }
-      return merged;
+      const dtSec = (pLatest.timestamp && pEarlier.timestamp) ? (pLatest.timestamp - pEarlier.timestamp) / 1000 : 0;
+      if (dtSec >= 1 && dtSec <= 20) {
+        const dM = calculateDistance(pEarlier.lat, pEarlier.lng, pLatest.lat, pLatest.lng) * 1000;
+        const derivedSpeed = (dM / dtSec) * 3.6;
+        if (derivedSpeed >= 0 && derivedSpeed < 250) {
+          return Math.round(derivedSpeed);
+        }
+      }
     }
-    return buf;
-  }, [coordinates, currentLocation]);
+    // 3. Fallback to session average speed if running
+    if (elapsedSeconds > 0 && totalDistanceKm > 0) {
+      return Math.round((totalDistanceKm / (elapsedSeconds / 3600)));
+    }
+    return 0;
+  }, [currentLocation, coordinates, recentGpsTrail, elapsedSeconds, totalDistanceKm]);
+
+  // Track coordinates for slope calculation: prioritize recorded route (coordinates)
+  // but backfill with recent GPS buffer if recorded points are still few (< 6 points)
+  const trackForSlope = useMemo(() => {
+    if (coordinates && coordinates.length >= 6) {
+      return coordinates;
+    }
+    if (recentGpsTrail.length > 0) {
+      if (coordinates && coordinates.length > 0) {
+        const merged = [...recentGpsTrail];
+        for (const pt of coordinates) {
+          if (!merged.some((m) => m.timestamp && pt.timestamp && m.timestamp === pt.timestamp)) {
+            merged.push(pt);
+          }
+        }
+        return merged;
+      }
+      return recentGpsTrail;
+    }
+    return coordinates || [];
+  }, [coordinates, recentGpsTrail]);
 
   // Slope / Incline / Grade calculation (Lejtmenet / Felfelé menet szög és meredekség)
   const slopeMetrics: SlopeMetrics = useMemo(() => {
@@ -493,11 +535,11 @@ export const MapsView: React.FC<MapsViewProps> = ({
                     </div>
 
                     {/* Live Slope Box */}
-                    <div className={`p-2 sm:p-2.5 rounded-xl border transition-all ${
+                    <div className={`p-2.5 rounded-xl border transition-all ${
                       slopeMetrics.direction === 'up'
-                        ? 'bg-gradient-to-br from-emerald-50 via-teal-50/80 to-emerald-50 border-emerald-300/80 shadow-2xs'
+                        ? 'bg-gradient-to-br from-emerald-50 via-teal-50/80 to-emerald-50 border-emerald-300 shadow-2xs'
                         : slopeMetrics.direction === 'down'
-                        ? 'bg-gradient-to-br from-sky-50 via-blue-50/80 to-sky-50 border-blue-300/80 shadow-2xs'
+                        ? 'bg-gradient-to-br from-sky-50 via-blue-50/80 to-sky-50 border-blue-300 shadow-2xs'
                         : 'bg-slate-50/90 border-slate-200/80'
                     }`}>
                       <div className="flex items-center justify-between">
@@ -507,16 +549,17 @@ export const MapsView: React.FC<MapsViewProps> = ({
                           {slopeMetrics.direction === 'down' && <TrendingDown className="w-4 h-4 text-blue-600 stroke-[3]" />}
                           {slopeMetrics.direction === 'flat' && <Minus className="w-4 h-4 text-slate-400 stroke-[3]" />}
                         </div>
-                        <span className={`p-1 rounded-full flex items-center justify-center ${
+                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold flex items-center gap-1 ${
                           slopeMetrics.direction === 'up'
-                            ? 'bg-emerald-200/90 text-emerald-900 border border-emerald-300'
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                             : slopeMetrics.direction === 'down'
-                            ? 'bg-blue-200/90 text-blue-900 border border-blue-300'
-                            : 'bg-slate-200 text-slate-700'
+                            ? 'bg-blue-100 text-blue-800 border border-blue-300'
+                            : 'bg-slate-200/80 text-slate-700'
                         }`}>
-                          {slopeMetrics.direction === 'up' && <ArrowUpRight className="w-3.5 h-3.5 stroke-[2.5]" />}
-                          {slopeMetrics.direction === 'down' && <ArrowDownRight className="w-3.5 h-3.5 stroke-[2.5]" />}
-                          {slopeMetrics.direction === 'flat' && <Minus className="w-3.5 h-3.5 stroke-[2.5]" />}
+                          {slopeMetrics.direction === 'up' && <ArrowUpRight className="w-3 h-3 stroke-[2.5]" />}
+                          {slopeMetrics.direction === 'down' && <ArrowDownRight className="w-3 h-3 stroke-[2.5]" />}
+                          {slopeMetrics.direction === 'flat' && <Minus className="w-3 h-3 stroke-[2.5]" />}
+                          <span>{slopeMetrics.shortLabel}</span>
                         </span>
                       </div>
 
@@ -541,6 +584,13 @@ export const MapsView: React.FC<MapsViewProps> = ({
                           <div className="text-sm sm:text-base font-black font-mono text-slate-800 leading-tight">
                             {slopeMetrics.altitudeMeters != null ? `${slopeMetrics.altitudeMeters} m` : '---'}
                           </div>
+                          {slopeMetrics.elevationDeltaMeters !== 0 && slopeMetrics.direction !== 'flat' && (
+                            <div className={`text-[10px] font-bold font-mono ${
+                              slopeMetrics.direction === 'up' ? 'text-emerald-600' : 'text-blue-600'
+                            }`}>
+                              Δ {slopeMetrics.elevationDeltaMeters > 0 ? '+' : ''}{slopeMetrics.elevationDeltaMeters} m
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
