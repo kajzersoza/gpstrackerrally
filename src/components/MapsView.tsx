@@ -187,21 +187,12 @@ export const MapsView: React.FC<MapsViewProps> = ({
   }, [currentLocation, coordinates, recentGpsTrail, elapsedSeconds, totalDistanceKm]);
 
   // Track coordinates for slope calculation: prioritize recorded route (coordinates)
-  // but backfill with recent GPS buffer if recorded points are still few (< 6 points)
+  // when active (>= 4 points), or use recent continuous GPS trail buffer in standby / initial phase
   const trackForSlope = useMemo(() => {
-    if (coordinates && coordinates.length >= 6) {
+    if (coordinates && coordinates.length >= 4) {
       return coordinates;
     }
     if (recentGpsTrail.length > 0) {
-      if (coordinates && coordinates.length > 0) {
-        const merged = [...recentGpsTrail];
-        for (const pt of coordinates) {
-          if (!merged.some((m) => m.timestamp && pt.timestamp && m.timestamp === pt.timestamp)) {
-            merged.push(pt);
-          }
-        }
-        return merged;
-      }
       return recentGpsTrail;
     }
     return coordinates || [];
