@@ -258,6 +258,10 @@ export interface SlopeMetrics {
   hasAltitudeData: boolean;
   horizontalDistanceMeters: number;
   elevationDeltaMeters: number;
+  projectedPoints?: Coordinate[];
+  headingDeg?: number | null;
+  compassDirection?: string | null;
+  isPredictiveActive?: boolean;
 }
 
 /**
@@ -281,27 +285,142 @@ function medianFilter(values: number[]): number[] {
 }
 
 /**
+ * Calculates 1-2 forward lookahead GPS coordinates based on current position,
+ * movement direction (heading/bearing), speed, and recent elevation trend.
+ *
+ * This provides forward directional momentum for slope and altitude calculations,
+ * dampening instantaneous 1m GPS noise and preventing sudden flip-flops.
+ */
+export function calculateForwardGpsPoints(
+  currentLocation: Coordinate | null,
+  track: Coordinate[],
+  count: number = 2,
+  speedKmh: number = 0
+): Coordinate[] {
+  if (!currentLocation || typeof currentLocation.lat !== 'number' || typeof currentLocation.lng !== 'number') {
+    return [];
+  }
+
+  // Determine direction (heading in degrees 0..360)
+  let headingDeg: number | null = null;
+  if (typeof currentLocation.heading === 'number' && !isNaN(currentLocation.heading) && currentLocation.heading >= 0) {
+    headingDeg = currentLocation.heading;
+  } else if (track && track.length >= 2) {
+    // Find a previous point at least 2.5m away to compute a reliable bearing
+    for (let i = track.length - 1; i >= 0; i--) {
+      const p = track[i];
+      const distM = calculateDistance(p.lat, p.lng, currentLocation.lat, currentLocation.lng) * 1000;
+      if (distM >= 2.5) {
+        headingDeg = calculateBearing(p.lat, p.lng, currentLocation.lat, currentLocation.lng);
+        break;
+      }
+    }
+  }
+
+  // If no directional vector can be determined (e.g. stationary / no prior movement), return empty
+  if (headingDeg === null) {
+    return [];
+  }
+
+  // Determine step distance (meters per forward projection point)
+  // At bike speed 15 km/h = ~4.2 m/s, 1.5s step = ~6.3m.
+  // Clamped between 5m and 22m.
+  const effectiveSpeedMs = (speedKmh > 0 ? speedKmh : (currentLocation.speed || 0) * 3.6) / 3.6;
+  const stepDistMeters = Math.max(5.0, Math.min(22.0, effectiveSpeedMs > 0.8 ? effectiveSpeedMs * 1.6 : 7.0));
+
+  // Determine vertical elevation trend (meters of elevation change per meter of horizontal distance)
+  let currentAlt = currentLocation.altitude != null && !isNaN(currentLocation.altitude) ? currentLocation.altitude : null;
+  if (currentAlt === null && track) {
+    for (let i = track.length - 1; i >= 0; i--) {
+      if (typeof track[i].altitude === 'number' && !isNaN(track[i].altitude!)) {
+        currentAlt = track[i].altitude!;
+        break;
+      }
+    }
+  }
+
+  let verticalGradient = 0; // m/m
+  if (currentAlt !== null && track && track.length >= 3) {
+    let accDist = 0;
+    let baselineAlt = currentAlt;
+    for (let i = track.length - 1; i >= 1; i--) {
+      const p1 = track[i - 1];
+      const p2 = track[i];
+      const dM = calculateDistance(p1.lat, p1.lng, p2.lat, p2.lng) * 1000;
+      if (dM < 0.2 || dM > 120) continue;
+      accDist += dM;
+      if (typeof p1.altitude === 'number' && !isNaN(p1.altitude)) {
+        baselineAlt = p1.altitude;
+      }
+      if (accDist >= 55) break;
+    }
+
+    if (accDist >= 20) {
+      const totalDelta = currentAlt - baselineAlt;
+      const rawGrade = totalDelta / accDist;
+      // High-precision deadband on trend: if total delta is under 1.8m or grade is under 2.5%,
+      // treat vertical gradient as 0 (flat road forward lookahead) to prevent carrying forward noise!
+      if (Math.abs(totalDelta) >= 1.8 && Math.abs(rawGrade) >= 0.025) {
+        verticalGradient = Math.max(-0.16, Math.min(0.16, rawGrade));
+      }
+    }
+  }
+
+  const headingRad = (headingDeg * Math.PI) / 180;
+  const latRad = (currentLocation.lat * Math.PI) / 180;
+  const metersPerLat = 111132.95;
+  const metersPerLng = 111132.95 * Math.cos(latRad);
+
+  const projected: Coordinate[] = [];
+  const now = currentLocation.timestamp || Date.now();
+  const timeStepSec = stepDistMeters / Math.max(1.0, effectiveSpeedMs);
+
+  for (let k = 1; k <= count; k++) {
+    const forwardDist = k * stepDistMeters;
+    const dLat = (forwardDist * Math.cos(headingRad)) / metersPerLat;
+    const dLng = (forwardDist * Math.sin(headingRad)) / (metersPerLng || metersPerLat);
+
+    // Apply damping to forward altitude projection (0.80 for step 1, 0.60 for step 2)
+    const damping = k === 1 ? 0.80 : 0.60;
+    const projAlt = currentAlt !== null ? currentAlt + (forwardDist * verticalGradient * damping) : null;
+
+    projected.push({
+      lat: currentLocation.lat + dLat,
+      lng: currentLocation.lng + dLng,
+      altitude: projAlt != null ? Math.round(projAlt * 10) / 10 : null,
+      speed: currentLocation.speed,
+      accuracy: currentLocation.accuracy,
+      heading: headingDeg,
+      timestamp: now + Math.round(k * timeStepSec * 1000),
+    });
+  }
+
+  return projected;
+}
+
+/**
  * Calculates current slope / grade / angle of incline or decline based on GPS position,
  * distance, speed, and elevation data from the recorded route so far.
  *
- * NEW ROBUST METHOD:
- * 1. Extracts recent trajectory window along the route (target 25m - 90m depending on speed, min 12m).
- * 2. Rate-limits single-leg vertical jumps (clamps spurious jumps > 3.0m over short distances).
- * 3. Moving median filter: eliminates single-fix GPS altitude spikes.
- * 4. Distance-weighted exponential low-pass filter (tau ~ 10m): strips high-frequency jitter
- *    while preserving true uphill / downhill elevation trends.
- * 5. Multi-baseline gradient: combines trend regression (rise/run) with endpoint elevation delta,
- *    eliminating the fragile R² suppression that previously crushed real slopes to flat.
- * 6. Truly stationary detection: triggers ONLY when truly stationary (speed < 1.5 km/h and distance < 2.0m).
- * 7. Physical boundary clamp: limits slope to realistic range (max ±18% grade / ±10.5° angle),
- *    permanently preventing extreme values.
- * 8. Real-world Road Deadband: ±1.0° (±1.8% grade or elevation delta < 0.8m) guarantees 
- *    rock-solid 'Sík terep' output on flat ground without false downhill/uphill drift.
+ * ADVANCED PREDICTIVE & HYSTERESIS SMOOTHED METHOD:
+ * 1. Computes 1-2 forward lookahead GPS points along current direction and velocity vector.
+ * 2. Uses extended baseline window (65m - 110m for cycling, 45m - 60m for walking, 110m - 200m for car)
+ *    so normal consumer GPS altitude noise (±1m) produces < 1.2% grade and is eliminated.
+ * 3. Directional Momentum Lookahead: forward points anchor the trajectory in the direction of travel,
+ *    preventing single-second 1m GPS spikes from flipping the slope sign.
+ * 4. Multi-stage filtering: rate limits single-step vertical jumps, applies median filter,
+ *    and distance-weighted exponential smoothing (tau ~ 14m).
+ * 5. Elevated Noise Floor & Deadband: requires at least 1.8m - 2.0m of real elevation change
+ *    and 2.6% grade (1.5° angle) to trigger incline/decline.
+ * 6. State Hysteresis: maintains smooth transitions between 'flat', 'up', and 'down' without
+ *    fluttering or rapid toggling.
+ * 7. Temporal Smoothing: blends consecutive angle values to guarantee progressive, natural transitions.
  */
 export function calculateSlopeMetrics(
   currentLocation: Coordinate | null,
   coordinates: Coordinate[],
-  currentSpeedKmh: number = 0
+  currentSpeedKmh: number = 0,
+  previousMetrics?: SlopeMetrics | null
 ): SlopeMetrics {
   const defaultMetrics: SlopeMetrics = {
     angleDeg: 0,
@@ -315,6 +434,10 @@ export function calculateSlopeMetrics(
     hasAltitudeData: false,
     horizontalDistanceMeters: 0,
     elevationDeltaMeters: 0,
+    projectedPoints: [],
+    headingDeg: null,
+    compassDirection: null,
+    isPredictiveActive: false,
   };
 
   const rawList = Array.isArray(coordinates) ? coordinates : [];
@@ -335,6 +458,15 @@ export function calculateSlopeMetrics(
 
   if (track.length === 0) return defaultMetrics;
 
+  const currentLoc = currentLocation || track[track.length - 1];
+
+  // Compute 1-2 forward lookahead points based on direction and speed
+  const projectedPoints = calculateForwardGpsPoints(currentLoc, track, 2, currentSpeedKmh);
+  const headingDeg = (projectedPoints.length > 0 && projectedPoints[0].heading != null)
+    ? projectedPoints[0].heading
+    : (currentLoc?.heading ?? null);
+  const compassDirection = headingDeg != null ? getCompassDirection(headingDeg) : null;
+
   // Find the latest valid numeric altitude
   let latestAlt: number | null = null;
   for (let i = track.length - 1; i >= 0; i--) {
@@ -349,22 +481,27 @@ export function calculateSlopeMetrics(
       ...defaultMetrics,
       hasAltitudeData: false,
       label: 'Sík (nincs magasság adat)',
+      projectedPoints,
+      headingDeg,
+      compassDirection,
+      isPredictiveActive: projectedPoints.length > 0,
     };
   }
 
   // Physical Baseline Window along the route:
-  // For walking (< 8 km/h): window is 35m - 50m
-  // For cycling (8 - 35 km/h): window is 55m - 90m (approx. 10-18 seconds of cycling)
-  // For driving (> 35 km/h): window is 90m - 160m
+  // For walking (< 8 km/h): window is 45m - 60m
+  // For cycling (8 - 35 km/h): extended window of 65m - 110m (approx. 15-25 seconds of cycling)
+  //   which physically buffers against normal ±1m smartphone GPS altitude noise.
+  // For driving (> 35 km/h): window is 110m - 200m
   const targetWindowMeters = Math.max(
-    35,
-    Math.min(160, currentSpeedKmh > 35 ? currentSpeedKmh * 2.2 : currentSpeedKmh > 8 ? currentSpeedKmh * 2.8 : 40)
+    45,
+    Math.min(200, currentSpeedKmh > 35 ? currentSpeedKmh * 2.5 : currentSpeedKmh > 8 ? currentSpeedKmh * 3.4 : 50)
   );
-  // Minimum required distance along the route before computing non-flat slope
-  const minRequiredMeters = Math.max(22, Math.min(45, targetWindowMeters * 0.4));
-  const maxPointsToCollect = 40;
+  // Minimum required historical distance along the route before computing non-flat slope
+  const minRequiredMeters = Math.max(28, Math.min(55, targetWindowMeters * 0.42));
+  const maxPointsToCollect = 50;
 
-  // Collect points strictly BACKWARDS from the latest point (ensuring only recent trajectory is analyzed)
+  // Collect points strictly BACKWARDS from the latest point
   const collectedPointsRev: Coordinate[] = [track[track.length - 1]];
   let accumulatedDistMeters = 0;
 
@@ -373,8 +510,8 @@ export function calculateSlopeMetrics(
     const prevPt = track[i - 1];
     const legM = calculateDistance(prevPt.lat, prevPt.lng, currPt.lat, currPt.lng) * 1000;
 
-    // Reject disconnected jumps (e.g. GPS teleport or pause gap > 200m)
-    if (legM > 200) {
+    // Reject disconnected jumps (e.g. GPS teleport or pause gap > 250m)
+    if (legM > 250) {
       break;
     }
 
@@ -402,6 +539,9 @@ export function calculateSlopeMetrics(
       horizontalDistanceMeters: Math.round(accumulatedDistMeters),
       label: 'Álló helyzet (0.0°)',
       shortLabel: 'Álló helyzet',
+      headingDeg,
+      compassDirection,
+      isPredictiveActive: false,
     };
   }
 
@@ -414,11 +554,18 @@ export function calculateSlopeMetrics(
       horizontalDistanceMeters: Math.round(accumulatedDistMeters),
       label: 'Sík terep (0.0°)',
       shortLabel: 'Sík terep',
+      projectedPoints,
+      headingDeg,
+      compassDirection,
+      isPredictiveActive: projectedPoints.length > 0,
     };
   }
 
-  // Reverse so points are in chronological order: [oldest in window ... newest in window]
-  const chronological = collectedPointsRev.slice().reverse();
+  // Reverse so historical points are in chronological order: [oldest in window ... newest in window]
+  const historicalChronological = collectedPointsRev.slice().reverse();
+
+  // Combine historical points with forward-projected lookahead points (1-2 points ahead)
+  const fullTrajectory = [...historicalChronological, ...projectedPoints];
 
   interface ValidPoint {
     dist: number;
@@ -427,17 +574,17 @@ export function calculateSlopeMetrics(
   const validPoints: ValidPoint[] = [];
   let cumDist = 0;
 
-  for (let i = 0; i < chronological.length; i++) {
+  for (let i = 0; i < fullTrajectory.length; i++) {
     if (i > 0) {
-      const pPrev = chronological[i - 1];
-      const pCurr = chronological[i];
+      const pPrev = fullTrajectory[i - 1];
+      const pCurr = fullTrajectory[i];
       const dM = calculateDistance(pPrev.lat, pPrev.lng, pCurr.lat, pCurr.lng) * 1000;
       cumDist += dM;
     }
-    if (typeof chronological[i].altitude === 'number' && !isNaN(chronological[i].altitude!)) {
+    if (typeof fullTrajectory[i].altitude === 'number' && !isNaN(fullTrajectory[i].altitude!)) {
       validPoints.push({
         dist: cumDist,
-        alt: chronological[i].altitude!,
+        alt: fullTrajectory[i].altitude!,
       });
     }
   }
@@ -448,14 +595,18 @@ export function calculateSlopeMetrics(
       altitudeMeters: Math.round(latestAlt),
       hasAltitudeData: true,
       horizontalDistanceMeters: Math.round(cumDist),
+      projectedPoints,
+      headingDeg,
+      compassDirection,
+      isPredictiveActive: projectedPoints.length > 0,
     };
   }
 
-  // Step 1: Clamp excessive single-step jumps (max 2.5m or 20% gradient per leg)
+  // Step 1: Clamp excessive single-step jumps (max 2.2m or 18% gradient per leg)
   const rateLimitedAlts: number[] = [validPoints[0].alt];
   for (let i = 1; i < validPoints.length; i++) {
     const legDist = Math.max(0.5, validPoints[i].dist - validPoints[i - 1].dist);
-    const maxDelta = Math.max(2.5, legDist * 0.20);
+    const maxDelta = Math.max(2.2, legDist * 0.18);
     const rawDelta = validPoints[i].alt - rateLimitedAlts[i - 1];
     const clampedDelta = Math.max(-maxDelta, Math.min(maxDelta, rawDelta));
     rateLimitedAlts.push(rateLimitedAlts[i - 1] + clampedDelta);
@@ -465,11 +616,11 @@ export function calculateSlopeMetrics(
   const medianAlts = medianFilter(rateLimitedAlts);
 
   // Step 3: Distance-weighted low-pass filter (exponential moving average along distance)
-  // Distance constant tau = 12m filters high-frequency noise while smoothly tracking true slopes
+  // Distance constant tau = 14m filters high-frequency noise while smoothly tracking true slopes
   const smoothedAlts: number[] = [medianAlts[0]];
   for (let i = 1; i < medianAlts.length; i++) {
     const dx = Math.max(0.2, validPoints[i].dist - validPoints[i - 1].dist);
-    const alpha = 1 - Math.exp(-dx / 12);
+    const alpha = 1 - Math.exp(-dx / 14);
     const prev = smoothedAlts[i - 1];
     smoothedAlts.push(prev + alpha * (medianAlts[i] - prev));
   }
@@ -505,43 +656,99 @@ export function calculateSlopeMetrics(
 
   const regressionSlope = varX > 1.0 ? covXY / varX : endpointSlope;
 
-  // Blended slope: 70% regression trend + 30% endpoint rise/run
-  let slope = 0.7 * regressionSlope + 0.3 * endpointSlope;
+  // Blended slope: 75% regression trend + 25% endpoint rise/run
+  const rawSlope = 0.75 * regressionSlope + 0.25 * endpointSlope;
 
   // Step 5: Convert to Grade % and Incline Angle (degrees)
-  let gradePercent = slope * 100;
-  let angleDeg = (Math.atan(slope) * 180) / Math.PI;
+  let rawGradePercent = rawSlope * 100;
+  let rawAngleDeg = (Math.atan(rawSlope) * 180) / Math.PI;
 
-  // Strict physical clamp to realistic road limits (max ±18% grade, max ±10.5° angle)
-  gradePercent = Math.max(-18, Math.min(18, gradePercent));
-  angleDeg = Math.max(-10.5, Math.min(10.5, angleDeg));
+  // Strict physical clamp to realistic road limits (max ±16% grade, max ±9.5° angle)
+  rawGradePercent = Math.max(-16, Math.min(16, rawGradePercent));
+  rawAngleDeg = Math.max(-9.5, Math.min(9.5, rawAngleDeg));
 
-  // Step 6: Grounded Flat Road Deadband and GPS Noise Floor
-  // Real world road gradient tolerance:
-  // If absolute elevation change across the entire window is under 0.8m,
-  // OR the grade is under 1.8% (angle under 1.0°), it is reliably flat road.
-  // This guarantees that normal ±0.5m GPS noise on flat terrain will NOT produce false downhill/uphill indicators.
+  // Step 6: Grounded Road Deadband and Hysteresis
+  // To prevent rapid switching on 1m GPS fluctuations:
+  // - Real slope requires at least 1.8m elevation delta AND 2.6% grade (1.5° angle) to ENTER
+  // - Once in uphill/downhill, hysteresis keeps the state until dropping below 0.9° / 1.0m delta
   const absDelta = Math.abs(totalElevationDelta);
-  if (absDelta < 0.8 || Math.abs(gradePercent) < 1.8 || Math.abs(angleDeg) < 1.0) {
-    angleDeg = 0;
-    gradePercent = 0;
+  const prevDir = previousMetrics?.direction || 'flat';
+
+  let resolvedDirection: 'up' | 'down' | 'flat' = 'flat';
+  let targetAngle = 0;
+  let targetGrade = 0;
+
+  if (prevDir === 'up') {
+    // In uphill state: stay uphill if angle >= 0.9° and totalElevationDelta >= 0.9m
+    if (rawAngleDeg >= 0.9 && totalElevationDelta >= 0.9) {
+      resolvedDirection = 'up';
+      targetAngle = rawAngleDeg;
+      targetGrade = rawGradePercent;
+    } else if (rawAngleDeg <= -1.6 && totalElevationDelta <= -1.8) {
+      // Confirmed sharp reversal directly to downhill
+      resolvedDirection = 'down';
+      targetAngle = rawAngleDeg;
+      targetGrade = rawGradePercent;
+    } else {
+      resolvedDirection = 'flat';
+      targetAngle = 0;
+      targetGrade = 0;
+    }
+  } else if (prevDir === 'down') {
+    // In downhill state: stay downhill if angle <= -0.9° and totalElevationDelta <= -0.9m
+    if (rawAngleDeg <= -0.9 && totalElevationDelta <= -0.9) {
+      resolvedDirection = 'down';
+      targetAngle = rawAngleDeg;
+      targetGrade = rawGradePercent;
+    } else if (rawAngleDeg >= 1.6 && totalElevationDelta >= 1.8) {
+      // Confirmed sharp reversal directly to uphill
+      resolvedDirection = 'up';
+      targetAngle = rawAngleDeg;
+      targetGrade = rawGradePercent;
+    } else {
+      resolvedDirection = 'flat';
+      targetAngle = 0;
+      targetGrade = 0;
+    }
+  } else {
+    // Previously flat: require robust threshold to declare uphill or downhill
+    if (rawAngleDeg >= 1.5 && absDelta >= 1.8 && rawGradePercent >= 2.6) {
+      resolvedDirection = 'up';
+      // Soft threshold subtraction so transition is progressive
+      targetAngle = Math.max(0.8, rawAngleDeg - 0.5);
+      targetGrade = Math.max(1.4, rawGradePercent - 1.0);
+    } else if (rawAngleDeg <= -1.5 && absDelta >= 1.8 && rawGradePercent <= -2.6) {
+      resolvedDirection = 'down';
+      targetAngle = Math.min(-0.8, rawAngleDeg + 0.5);
+      targetGrade = Math.min(-1.4, rawGradePercent + 1.0);
+    } else {
+      resolvedDirection = 'flat';
+      targetAngle = 0;
+      targetGrade = 0;
+    }
   }
 
-  const roundedAngle = Math.round(angleDeg * 10) / 10;
-  const roundedGrade = Math.round(gradePercent);
+  // Step 7: Temporal Exponential Smoothing
+  // Smooth the angle with previous readings (60% previous + 40% current) so transitions are gradual and natural
+  let finalAngle = targetAngle;
+  let finalGrade = targetGrade;
+  if (previousMetrics && previousMetrics.hasAltitudeData && previousMetrics.direction === resolvedDirection) {
+    finalAngle = 0.58 * previousMetrics.angleDeg + 0.42 * targetAngle;
+    finalGrade = 0.58 * previousMetrics.gradePercent + 0.42 * targetGrade;
+  }
 
-  let direction: 'up' | 'down' | 'flat' = 'flat';
+  const roundedAngle = Math.round(finalAngle * 10) / 10;
+  const roundedGrade = Math.round(finalGrade);
+
   let shortLabel = 'Sík terep';
   let label = 'Sík terep';
   let sign = '';
 
-  if (roundedAngle >= 1.0) {
-    direction = 'up';
+  if (resolvedDirection === 'up') {
     shortLabel = 'Felfelé menet';
     label = 'Felfelé menet';
     sign = '+';
-  } else if (roundedAngle <= -1.0) {
-    direction = 'down';
+  } else if (resolvedDirection === 'down') {
     shortLabel = 'Lejtmenet';
     label = 'Lejtmenet';
     sign = roundedAngle < 0 ? '' : '-';
@@ -553,7 +760,7 @@ export function calculateSlopeMetrics(
   return {
     angleDeg: roundedAngle,
     gradePercent: roundedGrade,
-    direction,
+    direction: resolvedDirection,
     label: `${label} (${sign}${roundedAngle.toFixed(1)}°)`,
     shortLabel,
     formattedAngle: `${sign}${roundedAngle.toFixed(1)}°`,
@@ -562,6 +769,10 @@ export function calculateSlopeMetrics(
     hasAltitudeData: true,
     horizontalDistanceMeters: Math.round(totalWindowDist),
     elevationDeltaMeters: Math.round(totalElevationDelta * 10) / 10,
+    projectedPoints,
+    headingDeg,
+    compassDirection,
+    isPredictiveActive: projectedPoints.length > 0,
   };
 }
 

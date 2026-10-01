@@ -4,6 +4,7 @@ export interface Coordinate {
   altitude?: number | null;
   speed?: number | null;
   accuracy?: number | null;
+  heading?: number | null;
   timestamp: number;
 }
 

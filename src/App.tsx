@@ -12,6 +12,7 @@ import {
 } from './types';
 import {
   calculateDistance,
+  calculateBearing,
   calculateSplitTrend,
   formatSplitDuration,
   formatClockTime,
@@ -501,13 +502,48 @@ export default function App() {
       const accuracy = typeof pos.coords.accuracy === 'number' && !isNaN(pos.coords.accuracy) ? pos.coords.accuracy : null;
       const speed = typeof pos.coords.speed === 'number' && !isNaN(pos.coords.speed) ? pos.coords.speed : null;
       const altitude = typeof pos.coords.altitude === 'number' && !isNaN(pos.coords.altitude) ? pos.coords.altitude : null;
+      const heading = typeof pos.coords.heading === 'number' && !isNaN(pos.coords.heading) && pos.coords.heading >= 0
+        ? pos.coords.heading
+        : null;
+
+      // Determine effective movement heading
+      let effectiveHeading = heading;
+      if (effectiveHeading === null && lastLocationRef.current) {
+        const dM = calculateDistance(
+          lastLocationRef.current.lat,
+          lastLocationRef.current.lng,
+          pos.coords.latitude,
+          pos.coords.longitude
+        ) * 1000;
+        if (dM >= 1.5) {
+          effectiveHeading = calculateBearing(
+            lastLocationRef.current.lat,
+            lastLocationRef.current.lng,
+            pos.coords.latitude,
+            pos.coords.longitude
+          );
+        } else if (lastLocationRef.current.heading != null) {
+          effectiveHeading = lastLocationRef.current.heading;
+        }
+      }
+
+      // Smooth altitude transitions to eliminate instant ±1m raw sensor jitter
+      let effectiveAltitude = altitude;
+      if (altitude !== null && lastLocationRef.current?.altitude != null) {
+        const prevAlt = lastLocationRef.current.altitude;
+        const dAlt = altitude - prevAlt;
+        // Clamp single-fix extreme altitude jumps to max 2.2m
+        const clampedDAlt = Math.max(-2.2, Math.min(2.2, dAlt));
+        effectiveAltitude = Math.round((prevAlt + clampedDAlt * 0.45) * 10) / 10;
+      }
 
       const newCoord: Coordinate = {
         lat: pos.coords.latitude,
         lng: pos.coords.longitude,
-        altitude,
+        altitude: effectiveAltitude,
         speed,
         accuracy,
+        heading: effectiveHeading != null ? Math.round(effectiveHeading * 10) / 10 : null,
         timestamp: now,
       };
 
@@ -686,12 +722,14 @@ export default function App() {
       simLat += dLat;
       simLng += dLng;
 
+      const headingDeg = ((heading * 180 / Math.PI) % 360 + 360) % 360;
       const newCoord: Coordinate = {
         lat: simLat,
         lng: simLng,
         altitude: 20 + Math.sin(Date.now() / 5000) * 8,
         speed: 3.5 * speedMultiplier,
         accuracy: 4,
+        heading: Math.round(headingDeg),
         timestamp: Date.now(),
       };
 

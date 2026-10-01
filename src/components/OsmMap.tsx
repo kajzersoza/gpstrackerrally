@@ -30,6 +30,7 @@ export interface OsmMapProps {
   onLayerChange?: (layer: MapLayerType) => void;
   focusedSplitId?: string | null;
   onSelectSplit?: (split: Split) => void;
+  projectedCoordinates?: Coordinate[];
 }
 
 // Persist last fitted track key, user zoom level, and center across tab switches and component mounts
@@ -55,6 +56,7 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
   onLayerChange,
   focusedSplitId = null,
   onSelectSplit,
+  projectedCoordinates = [],
 }, ref) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -63,6 +65,7 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
   const polylineCasingRef = useRef<L.Polyline | null>(null);
   const referencePolylineRef = useRef<L.Polyline | null>(null);
   const referencePolylineCasingRef = useRef<L.Polyline | null>(null);
+  const projectedPolylineRef = useRef<L.Polyline | null>(null);
   const currentMarkerRef = useRef<L.Marker | null>(null);
   const startMarkerRef = useRef<L.Marker | null>(null);
   const stopMarkerRef = useRef<L.Marker | null>(null);
@@ -220,6 +223,17 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
       lineJoin: 'round',
     }).addTo(map);
     polylineRef.current = polyline;
+
+    // Directional forward-projected lookahead guide polyline (subtle dashed indigo ray)
+    const projectedPolyline = L.polyline([], {
+      color: '#4f46e5',
+      weight: 3.5,
+      opacity: 0.85,
+      dashArray: '5, 6',
+      lineCap: 'round',
+      lineJoin: 'round',
+    }).addTo(map);
+    projectedPolylineRef.current = projectedPolyline;
 
     mapRef.current = map;
 
@@ -626,6 +640,20 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
       polylineRef.current.setLatLngs(latLngs);
     }
 
+    // Update forward projected lookahead polyline (1-2 points ahead along direction)
+    if (projectedPolylineRef.current) {
+      const activeLoc = currentLocation || (coordinates.length > 0 ? coordinates[coordinates.length - 1] : null);
+      if (isTracking && activeLoc && projectedCoordinates && projectedCoordinates.length > 0) {
+        const projLatLngs: [number, number][] = [
+          [activeLoc.lat, activeLoc.lng],
+          ...projectedCoordinates.map((c) => [c.lat, c.lng] as [number, number]),
+        ];
+        projectedPolylineRef.current.setLatLngs(projLatLngs);
+      } else {
+        projectedPolylineRef.current.setLatLngs([]);
+      }
+    }
+
     // Start marker (Flag badge with sharp pointer tip)
     if (latLngs.length > 0) {
       const startLatLng = latLngs[0];
@@ -829,19 +857,38 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
 
     if (activeLoc) {
       const activeLatLng: [number, number] = [activeLoc.lat, activeLoc.lng];
+      const hasHeading = typeof activeLoc.heading === 'number' && !isNaN(activeLoc.heading);
+      const headingDeg = hasHeading ? activeLoc.heading! : 0;
 
       const customIcon = L.divIcon({
         className: 'custom-gps-icon',
         html: `
-          <div style="position: relative; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;">
-            <div style="position: absolute; width: 28px; height: 28px; border-radius: 9999px; background: rgba(0, 96, 230, 0.28);" class="gps-pulse-marker"></div>
-            <div style="width: 14px; height: 14px; border-radius: 9999px; background: #0060e6; border: 2.5px solid #ffffff; box-shadow: 0 2px 6px rgba(0,0,0,0.4); z-index: 2;"></div>
-            <div style="position: absolute; width: 2px; height: 2px; border-radius: 9999px; background: #ffffff; z-index: 3;"></div>
+          <div style="position: relative; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">
+            <div style="position: absolute; width: 32px; height: 32px; border-radius: 9999px; background: rgba(0, 96, 230, 0.25);" class="gps-pulse-marker"></div>
+            <div style="width: 14px; height: 14px; border-radius: 9999px; background: #0060e6; border: 2.5px solid #ffffff; box-shadow: 0 2px 6px rgba(0,0,0,0.4); z-index: 3;"></div>
+            <div style="position: absolute; width: 2px; height: 2px; border-radius: 9999px; background: #ffffff; z-index: 4;"></div>
+            ${hasHeading ? `
+              <div style="
+                position: absolute;
+                top: 0;
+                left: 50%;
+                width: 0;
+                height: 0;
+                margin-left: -5px;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-bottom: 9px solid #0050cb;
+                transform-origin: 5px 16px;
+                transform: rotate(${headingDeg}deg);
+                z-index: 2;
+                filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
+              "></div>
+            ` : ''}
           </div>
         `,
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
-        popupAnchor: [0, -14],
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+        popupAnchor: [0, -16],
       });
 
       if (!currentMarkerRef.current) {
@@ -1010,7 +1057,7 @@ export const OsmMap = forwardRef<OsmMapHandle, OsmMapProps>(({
         });
       }
     }
-  }, [coordinates, currentLocation, isTracking, splits, onSelectSplit]);
+  }, [coordinates, currentLocation, isTracking, splits, onSelectSplit, projectedCoordinates]);
 
   // Handle zooming to focused split marker safely (only when focusedSplitId actually changes)
   useEffect(() => {

@@ -198,9 +198,20 @@ export const MapsView: React.FC<MapsViewProps> = ({
     return coordinates || [];
   }, [coordinates, recentGpsTrail]);
 
+  // Rolling slope metrics ref for hysteresis and temporal smoothing
+  const lastSlopeMetricsRef = useRef<SlopeMetrics | null>(null);
+
   // Slope / Incline / Grade calculation (Lejtmenet / Felfelé menet szög és meredekség)
+  // Incorporates 1-2 forward lookahead points along heading and robust hysteresis
   const slopeMetrics: SlopeMetrics = useMemo(() => {
-    return calculateSlopeMetrics(currentLocation, trackForSlope, currentSpeedKmh);
+    const metrics = calculateSlopeMetrics(
+      currentLocation,
+      trackForSlope,
+      currentSpeedKmh,
+      lastSlopeMetricsRef.current
+    );
+    lastSlopeMetricsRef.current = metrics;
+    return metrics;
   }, [currentLocation, trackForSlope, currentSpeedKmh]);
 
   // Formatted main distance
@@ -322,6 +333,7 @@ export const MapsView: React.FC<MapsViewProps> = ({
           interactive={true}
           showLayerSelector={false}
           showZoomControls={false}
+          projectedCoordinates={slopeMetrics.projectedPoints}
           onLayerChange={(layer) => onUpdateSettings({ mapLayer: layer })}
           onSelectSplit={(split) => setEditingSplit(split)}
         />
@@ -540,18 +552,29 @@ export const MapsView: React.FC<MapsViewProps> = ({
                           {slopeMetrics.direction === 'down' && <TrendingDown className="w-4 h-4 text-blue-600 stroke-[3]" />}
                           {slopeMetrics.direction === 'flat' && <Minus className="w-4 h-4 text-slate-400 stroke-[3]" />}
                         </div>
-                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold flex items-center gap-1 ${
-                          slopeMetrics.direction === 'up'
-                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                            : slopeMetrics.direction === 'down'
-                            ? 'bg-blue-100 text-blue-800 border border-blue-300'
-                            : 'bg-slate-200/80 text-slate-700'
-                        }`}>
-                          {slopeMetrics.direction === 'up' && <ArrowUpRight className="w-3 h-3 stroke-[2.5]" />}
-                          {slopeMetrics.direction === 'down' && <ArrowDownRight className="w-3 h-3 stroke-[2.5]" />}
-                          {slopeMetrics.direction === 'flat' && <Minus className="w-3 h-3 stroke-[2.5]" />}
-                          <span>{slopeMetrics.shortLabel}</span>
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          {slopeMetrics.isPredictiveActive && (
+                            <span
+                              className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-full flex items-center gap-0.5 shadow-2xs"
+                              title="Irány szerinti 1-2 pontos előrekalkuláció aktív a lejtés és emelkedés simításához"
+                            >
+                              <span>🔮</span>
+                              <span>+2 pont</span>
+                            </span>
+                          )}
+                          <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold flex items-center gap-1 ${
+                            slopeMetrics.direction === 'up'
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                              : slopeMetrics.direction === 'down'
+                              ? 'bg-blue-100 text-blue-800 border border-blue-300'
+                              : 'bg-slate-200/80 text-slate-700'
+                          }`}>
+                            {slopeMetrics.direction === 'up' && <ArrowUpRight className="w-3 h-3 stroke-[2.5]" />}
+                            {slopeMetrics.direction === 'down' && <ArrowDownRight className="w-3 h-3 stroke-[2.5]" />}
+                            {slopeMetrics.direction === 'flat' && <Minus className="w-3 h-3 stroke-[2.5]" />}
+                            <span>{slopeMetrics.shortLabel}</span>
+                          </span>
+                        </div>
                       </div>
 
                       <div className="flex items-baseline justify-between mt-1">
@@ -568,6 +591,12 @@ export const MapsView: React.FC<MapsViewProps> = ({
                           <span className="text-xs sm:text-sm font-bold text-slate-500 font-mono">
                             ({slopeMetrics.formattedGrade})
                           </span>
+                          {slopeMetrics.compassDirection && (
+                            <span className="text-[11px] font-mono font-semibold text-slate-400 ml-1">
+                              {slopeMetrics.compassDirection}
+                              {slopeMetrics.headingDeg != null ? ` ${Math.round(slopeMetrics.headingDeg)}°` : ''}
+                            </span>
+                          )}
                         </div>
 
                         <div className="text-right">
