@@ -532,9 +532,9 @@ export default function App() {
       if (altitude !== null && lastLocationRef.current?.altitude != null) {
         const prevAlt = lastLocationRef.current.altitude;
         const dAlt = altitude - prevAlt;
-        // Clamp single-fix extreme altitude jumps and apply low-pass filter
-        const clampedDAlt = Math.max(-1.8, Math.min(1.8, dAlt));
-        effectiveAltitude = Math.round((prevAlt + clampedDAlt * 0.35) * 10) / 10;
+        // Clamp single-fix wild spikes (> 3.5m per fix) while responsively tracking real climbing rates
+        const clampedDAlt = Math.max(-3.5, Math.min(3.5, dAlt));
+        effectiveAltitude = Math.round((prevAlt + clampedDAlt * 0.70) * 10) / 10;
       }
 
       const newCoord: Coordinate = {

@@ -490,17 +490,16 @@ export function calculateSlopeMetrics(
   }
 
   // Physical Baseline Window along the route:
-  // For walking (< 8 km/h): window is 45m - 60m
-  // For cycling (8 - 35 km/h): extended window of 65m - 110m (approx. 15-25 seconds of cycling)
-  //   which physically buffers against normal ±1m smartphone GPS altitude noise.
-  // For driving (> 35 km/h): window is 110m - 200m
+  // For walking (< 8 km/h): window is 35m - 50m
+  // For cycling (8 - 35 km/h): window of 45m - 75m (approx. 12-18 seconds of cycling)
+  // For driving (> 35 km/h): window is 75m - 140m
   const targetWindowMeters = Math.max(
-    45,
-    Math.min(200, currentSpeedKmh > 35 ? currentSpeedKmh * 2.5 : currentSpeedKmh > 8 ? currentSpeedKmh * 3.4 : 50)
+    35,
+    Math.min(140, currentSpeedKmh > 35 ? currentSpeedKmh * 1.8 : currentSpeedKmh > 8 ? Math.max(45, currentSpeedKmh * 3.2) : 40)
   );
-  // Minimum required historical distance along the route before computing non-flat slope
-  const minRequiredMeters = Math.max(28, Math.min(55, targetWindowMeters * 0.42));
-  const maxPointsToCollect = 50;
+  // Minimum required distance along the route before computing non-flat slope
+  const minRequiredMeters = 16;
+  const maxPointsToCollect = 40;
 
   // Collect points strictly BACKWARDS from the latest point
   const collectedPointsRev: Coordinate[] = [track[track.length - 1]];
@@ -523,7 +522,7 @@ export function calculateSlopeMetrics(
     collectedPointsRev.push(prevPt);
 
     if (
-      accumulatedDistMeters >= targetWindowMeters ||
+      (accumulatedDistMeters >= targetWindowMeters && collectedPointsRev.length >= 3) ||
       collectedPointsRev.length >= maxPointsToCollect
     ) {
       break;
@@ -531,8 +530,8 @@ export function calculateSlopeMetrics(
   }
 
   // Truly stationary detection:
-  // Speed is < 1.5 km/h AND traversed distance in window is < 2.0m
-  if (currentSpeedKmh < 1.5 && accumulatedDistMeters < 2.0) {
+  // Speed is < 1.2 km/h AND traversed distance in window is < 1.5m
+  if (currentSpeedKmh < 1.2 && accumulatedDistMeters < 1.5) {
     return {
       ...defaultMetrics,
       altitudeMeters: Math.round(latestAlt),
@@ -546,8 +545,8 @@ export function calculateSlopeMetrics(
     };
   }
 
-  // If total distance along recorded track is under minRequiredMeters, return flat
-  if (accumulatedDistMeters < minRequiredMeters || collectedPointsRev.length < 3) {
+  // If total distance along recorded track is under minRequiredMeters or fewer than 2 points, return flat
+  if (accumulatedDistMeters < minRequiredMeters || collectedPointsRev.length < 2) {
     return {
       ...defaultMetrics,
       altitudeMeters: Math.round(latestAlt),
@@ -564,9 +563,7 @@ export function calculateSlopeMetrics(
 
   // Reverse so historical points are in chronological order: [oldest in window ... newest in window]
   const historicalChronological = collectedPointsRev.slice().reverse();
-
-  // Combine historical points with forward-projected lookahead points (1-2 points ahead)
-  const fullTrajectory = [...historicalChronological, ...projectedPoints];
+  const N = historicalChronological.length;
 
   interface ValidPoint {
     dist: number;
@@ -575,22 +572,22 @@ export function calculateSlopeMetrics(
   const validPoints: ValidPoint[] = [];
   let cumDist = 0;
 
-  for (let i = 0; i < fullTrajectory.length; i++) {
+  for (let i = 0; i < N; i++) {
     if (i > 0) {
-      const pPrev = fullTrajectory[i - 1];
-      const pCurr = fullTrajectory[i];
+      const pPrev = historicalChronological[i - 1];
+      const pCurr = historicalChronological[i];
       const dM = calculateDistance(pPrev.lat, pPrev.lng, pCurr.lat, pCurr.lng) * 1000;
       cumDist += dM;
     }
-    if (typeof fullTrajectory[i].altitude === 'number' && !isNaN(fullTrajectory[i].altitude!)) {
+    if (typeof historicalChronological[i].altitude === 'number' && !isNaN(historicalChronological[i].altitude!)) {
       validPoints.push({
         dist: cumDist,
-        alt: fullTrajectory[i].altitude!,
+        alt: historicalChronological[i].altitude!,
       });
     }
   }
 
-  if (validPoints.length < 3 || cumDist < minRequiredMeters) {
+  if (validPoints.length < 2 || cumDist < minRequiredMeters) {
     return {
       ...defaultMetrics,
       altitudeMeters: Math.round(latestAlt),
@@ -603,76 +600,74 @@ export function calculateSlopeMetrics(
     };
   }
 
-  // Step 1: Clamp excessive single-step jumps (max 2.2m or 18% gradient per leg)
-  const rateLimitedAlts: number[] = [validPoints[0].alt];
-  for (let i = 1; i < validPoints.length; i++) {
-    const legDist = Math.max(0.5, validPoints[i].dist - validPoints[i - 1].dist);
-    const maxDelta = Math.max(2.2, legDist * 0.18);
-    const rawDelta = validPoints[i].alt - rateLimitedAlts[i - 1];
-    const clampedDelta = Math.max(-maxDelta, Math.min(maxDelta, rawDelta));
-    rateLimitedAlts.push(rateLimitedAlts[i - 1] + clampedDelta);
+  const M = validPoints.length;
+
+  // Step 1: 3-point moving median filter over the elevation window to remove single-point GPS vertical spikes
+  const medAlts: number[] = [];
+  for (let i = 0; i < M; i++) {
+    const win: number[] = [];
+    for (let offset = -1; offset <= 1; offset++) {
+      const idx = Math.max(0, Math.min(M - 1, i + offset));
+      win.push(validPoints[idx].alt);
+    }
+    win.sort((a, b) => a - b);
+    medAlts.push(win[1]);
   }
 
-  // Step 2: Moving median filter to eliminate GPS multipath impulses
-  const medianAlts = medianFilter(rateLimitedAlts);
-
-  // Step 3: Distance-weighted low-pass filter (exponential moving average along distance)
-  // Distance constant tau = 14m filters high-frequency noise while smoothly tracking true slopes
-  const smoothedAlts: number[] = [medianAlts[0]];
-  for (let i = 1; i < medianAlts.length; i++) {
-    const dx = Math.max(0.2, validPoints[i].dist - validPoints[i - 1].dist);
-    const alpha = 1 - Math.exp(-dx / 14);
-    const prev = smoothedAlts[i - 1];
-    smoothedAlts.push(prev + alpha * (medianAlts[i] - prev));
+  // Step 2: Rate-limited distance-weighted exponential smoothing along the distance axis
+  const smoothedAlts: number[] = [medAlts[0]];
+  for (let i = 1; i < M; i++) {
+    const legDx = Math.max(0.5, validPoints[i].dist - validPoints[i - 1].dist);
+    const maxClimb = legDx * 0.18 + 0.8; // max realistic climb 18% grade + 0.8m sensor slack
+    const rawDelta = medAlts[i] - smoothedAlts[i - 1];
+    const clampedDelta = Math.max(-maxClimb, Math.min(maxClimb, rawDelta));
+    const alpha = 1 - Math.exp(-legDx / 12);
+    smoothedAlts.push(smoothedAlts[i - 1] + alpha * clampedDelta);
   }
 
-  // Step 4: Multi-baseline Slope Computation
-  const N = validPoints.length;
-  const startPt = validPoints[0];
-  const endPt = validPoints[N - 1];
-  const totalWindowDist = Math.max(1.0, endPt.dist - startPt.dist);
-  const totalElevationDelta = smoothedAlts[N - 1] - smoothedAlts[0];
+  // Step 3: Slope computation (Linear regression + Endpoint trend blend)
+  const totalWindowDist = Math.max(1.0, validPoints[M - 1].dist - validPoints[0].dist);
+  const totalElevationDelta = smoothedAlts[M - 1] - smoothedAlts[0];
 
-  // A) Endpoint rise / run slope
-  const endpointSlope = totalElevationDelta / totalWindowDist;
+  let regressionSlope = 0;
+  if (M === 2) {
+    regressionSlope = totalElevationDelta / totalWindowDist;
+  } else {
+    let sumX = 0;
+    let sumY = 0;
+    for (let i = 0; i < M; i++) {
+      sumX += validPoints[i].dist;
+      sumY += smoothedAlts[i];
+    }
+    const meanX = sumX / M;
+    const meanY = sumY / M;
 
-  // B) Linear regression slope over the window: alt = slope * dist + c
-  let sumX = 0;
-  let sumY = 0;
-  for (let i = 0; i < N; i++) {
-    sumX += validPoints[i].dist;
-    sumY += smoothedAlts[i];
+    let covXY = 0;
+    let varX = 0;
+    for (let i = 0; i < M; i++) {
+      const dx = validPoints[i].dist - meanX;
+      const dy = smoothedAlts[i] - meanY;
+      covXY += dx * dy;
+      varX += dx * dx;
+    }
+    const reg = varX > 0.01 ? covXY / varX : 0;
+    const endpoint = totalElevationDelta / totalWindowDist;
+    // Blend: 75% linear regression trend + 25% endpoint rise/run
+    regressionSlope = 0.75 * reg + 0.25 * endpoint;
   }
-  const meanX = sumX / N;
-  const meanY = sumY / N;
 
-  let covXY = 0;
-  let varX = 0;
-  for (let i = 0; i < N; i++) {
-    const dx = validPoints[i].dist - meanX;
-    const dy = smoothedAlts[i] - meanY;
-    covXY += dx * dy;
-    varX += dx * dx;
-  }
+  let rawGradePercent = regressionSlope * 100;
+  let rawAngleDeg = (Math.atan(regressionSlope) * 180) / Math.PI;
 
-  const regressionSlope = varX > 1.0 ? covXY / varX : endpointSlope;
+  // Strict physical clamp to realistic road limits (max ±18% grade, max ±10° angle)
+  rawGradePercent = Math.max(-18, Math.min(18, rawGradePercent));
+  rawAngleDeg = Math.max(-10, Math.min(10, rawAngleDeg));
 
-  // Blended slope: 75% regression trend + 25% endpoint rise/run
-  const rawSlope = 0.75 * regressionSlope + 0.25 * endpointSlope;
-
-  // Step 5: Convert to Grade % and Incline Angle (degrees)
-  let rawGradePercent = rawSlope * 100;
-  let rawAngleDeg = (Math.atan(rawSlope) * 180) / Math.PI;
-
-  // Strict physical clamp to realistic road limits (max ±16% grade, max ±9.5° angle)
-  rawGradePercent = Math.max(-16, Math.min(16, rawGradePercent));
-  rawAngleDeg = Math.max(-9.5, Math.min(9.5, rawAngleDeg));
-
-  // Step 6: Grounded Road Deadband and Hysteresis
-  // To prevent rapid switching on 1m GPS fluctuations:
-  // - Real slope requires at least 2.8m elevation delta AND 3.0% grade (1.7° angle) to ENTER
-  // - Once in uphill/downhill, hysteresis keeps the state until dropping below 1.0° / 1.8m delta
-  const absDelta = Math.abs(totalElevationDelta);
+  // Step 4: Road Deadband and State Hysteresis
+  // Real cycling standards:
+  // - "Sík terep" (flat): grade between -1.5% and +1.5%
+  // - "Emelkedő" (uphill): grade >= +1.5% AND delta >= +0.5m
+  // - "Lejtő" (downhill): grade <= -1.5% AND delta <= -0.5m
   const prevDir = previousMetrics?.direction || 'flat';
 
   let resolvedDirection: 'up' | 'down' | 'flat' = 'flat';
@@ -680,13 +675,13 @@ export function calculateSlopeMetrics(
   let targetGrade = 0;
 
   if (prevDir === 'up') {
-    // In uphill state: stay uphill if angle >= 1.0° and totalElevationDelta >= 1.8m
-    if (rawAngleDeg >= 1.0 && totalElevationDelta >= 1.8) {
+    // In uphill state: stay in uphill as long as grade >= +1.0% or net rise >= +0.4m
+    if (rawGradePercent >= 1.0 || (rawGradePercent > 0.2 && totalElevationDelta >= 0.4)) {
       resolvedDirection = 'up';
       targetAngle = rawAngleDeg;
       targetGrade = rawGradePercent;
-    } else if (rawAngleDeg <= -1.8 && totalElevationDelta <= -2.6) {
-      // Confirmed sharp reversal directly to downhill
+    } else if (rawGradePercent <= -2.0 && totalElevationDelta <= -1.2) {
+      // Confirmed strong reversal to downhill
       resolvedDirection = 'down';
       targetAngle = rawAngleDeg;
       targetGrade = rawGradePercent;
@@ -696,13 +691,13 @@ export function calculateSlopeMetrics(
       targetGrade = 0;
     }
   } else if (prevDir === 'down') {
-    // In downhill state: stay downhill if angle <= -1.0° and totalElevationDelta <= -1.8m
-    if (rawAngleDeg <= -1.0 && totalElevationDelta <= -1.8) {
+    // In downhill state: stay in downhill as long as grade <= -1.0% or net drop <= -0.4m
+    if (rawGradePercent <= -1.0 || (rawGradePercent < -0.2 && totalElevationDelta <= -0.4)) {
       resolvedDirection = 'down';
       targetAngle = rawAngleDeg;
       targetGrade = rawGradePercent;
-    } else if (rawAngleDeg >= 1.8 && totalElevationDelta >= 2.6) {
-      // Confirmed sharp reversal directly to uphill
+    } else if (rawGradePercent >= 2.0 && totalElevationDelta >= 1.2) {
+      // Confirmed strong reversal to uphill
       resolvedDirection = 'up';
       targetAngle = rawAngleDeg;
       targetGrade = rawGradePercent;
@@ -712,16 +707,17 @@ export function calculateSlopeMetrics(
       targetGrade = 0;
     }
   } else {
-    // Previously flat: require robust threshold (>= 2.8m delta and >= 3.0% grade) to declare uphill or downhill
-    if (rawAngleDeg >= 1.7 && absDelta >= 2.8 && rawGradePercent >= 3.0) {
+    // Previously flat:
+    // To enter uphill: grade >= +1.5% AND delta >= +0.5m
+    // To enter downhill: grade <= -1.5% AND delta <= -0.5m
+    if (rawGradePercent >= 1.5 && totalElevationDelta >= 0.5) {
       resolvedDirection = 'up';
-      // Soft threshold subtraction so transition is progressive and not abrupt
-      targetAngle = Math.max(1.0, rawAngleDeg - 0.5);
-      targetGrade = Math.max(1.6, rawGradePercent - 1.0);
-    } else if (rawAngleDeg <= -1.7 && absDelta >= 2.8 && rawGradePercent <= -3.0) {
+      targetAngle = rawAngleDeg;
+      targetGrade = rawGradePercent;
+    } else if (rawGradePercent <= -1.5 && totalElevationDelta <= -0.5) {
       resolvedDirection = 'down';
-      targetAngle = Math.min(-1.0, rawAngleDeg + 0.5);
-      targetGrade = Math.min(-1.6, rawGradePercent + 1.0);
+      targetAngle = rawAngleDeg;
+      targetGrade = rawGradePercent;
     } else {
       resolvedDirection = 'flat';
       targetAngle = 0;
@@ -729,17 +725,16 @@ export function calculateSlopeMetrics(
     }
   }
 
-  // Step 7: Temporal Exponential Smoothing
-  // Smooth the angle with previous readings (70% previous + 30% current) so transitions are gradual and natural
+  // Step 5: Temporal Exponential Smoothing
   let finalAngle = targetAngle;
   let finalGrade = targetGrade;
   if (previousMetrics && previousMetrics.hasAltitudeData && previousMetrics.direction === resolvedDirection) {
-    finalAngle = 0.70 * previousMetrics.angleDeg + 0.30 * targetAngle;
-    finalGrade = 0.70 * previousMetrics.gradePercent + 0.30 * targetGrade;
+    finalAngle = 0.50 * previousMetrics.angleDeg + 0.50 * targetAngle;
+    finalGrade = 0.50 * previousMetrics.gradePercent + 0.50 * targetGrade;
   }
 
-  const roundedAngle = Math.round(finalAngle * 10) / 10;
-  const roundedGrade = Math.round(finalGrade);
+  const roundedAngle = Math.round(Math.abs(finalAngle) * 10) / 10;
+  const roundedGrade = Math.round(Math.abs(finalGrade));
 
   let shortLabel = 'Sík terep';
   let label = 'Sík terep';
@@ -752,20 +747,20 @@ export function calculateSlopeMetrics(
   } else if (resolvedDirection === 'down') {
     shortLabel = 'Lejtő';
     label = 'Lejtő';
-    sign = roundedAngle < 0 ? '' : '-';
+    sign = '-';
   }
 
   const currentSmoothedAlt = smoothedAlts[smoothedAlts.length - 1];
   const displayAlt = latestAlt != null ? Math.round(latestAlt) : Math.round(currentSmoothedAlt);
 
   return {
-    angleDeg: roundedAngle,
-    gradePercent: roundedGrade,
+    angleDeg: resolvedDirection === 'flat' ? 0 : (resolvedDirection === 'down' ? -roundedAngle : roundedAngle),
+    gradePercent: resolvedDirection === 'flat' ? 0 : (resolvedDirection === 'down' ? -roundedGrade : roundedGrade),
     direction: resolvedDirection,
     label,
     shortLabel,
-    formattedAngle: `${sign}${roundedAngle.toFixed(1)}°`,
-    formattedGrade: `${roundedGrade > 0 ? '+' : ''}${roundedGrade}%`,
+    formattedAngle: resolvedDirection === 'flat' ? '0.0°' : `${sign}${roundedAngle.toFixed(1)}°`,
+    formattedGrade: resolvedDirection === 'flat' ? '0%' : `${sign}${roundedGrade}%`,
     altitudeMeters: displayAlt,
     hasAltitudeData: true,
     horizontalDistanceMeters: Math.round(totalWindowDist),
