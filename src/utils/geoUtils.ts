@@ -355,13 +355,13 @@ export function calculateForwardGpsPoints(
       if (accDist >= 55) break;
     }
 
-    if (accDist >= 20) {
+    if (accDist >= 28) {
       const totalDelta = currentAlt - baselineAlt;
       const rawGrade = totalDelta / accDist;
-      // High-precision deadband on trend: if total delta is under 1.8m or grade is under 2.5%,
-      // treat vertical gradient as 0 (flat road forward lookahead) to prevent carrying forward noise!
-      if (Math.abs(totalDelta) >= 1.8 && Math.abs(rawGrade) >= 0.025) {
-        verticalGradient = Math.max(-0.16, Math.min(0.16, rawGrade));
+      // High-precision deadband on trend: requires at least 2.5m sustained elevation change
+      // and >= 3% grade over >= 28m to project vertical slope forward, preventing carrying forward 1m sensor noise!
+      if (Math.abs(totalDelta) >= 2.5 && Math.abs(rawGrade) >= 0.030) {
+        verticalGradient = Math.max(-0.15, Math.min(0.15, rawGrade));
       }
     }
   }
@@ -426,7 +426,7 @@ export function calculateSlopeMetrics(
     angleDeg: 0,
     gradePercent: 0,
     direction: 'flat',
-    label: 'Sík terep (0.0°)',
+    label: 'Sík terep',
     shortLabel: 'Sík terep',
     formattedAngle: '0.0°',
     formattedGrade: '0%',
@@ -480,7 +480,8 @@ export function calculateSlopeMetrics(
     return {
       ...defaultMetrics,
       hasAltitudeData: false,
-      label: 'Sík (nincs magasság adat)',
+      label: 'Sík terep',
+      shortLabel: 'Sík terep',
       projectedPoints,
       headingDeg,
       compassDirection,
@@ -537,8 +538,8 @@ export function calculateSlopeMetrics(
       altitudeMeters: Math.round(latestAlt),
       hasAltitudeData: true,
       horizontalDistanceMeters: Math.round(accumulatedDistMeters),
-      label: 'Álló helyzet (0.0°)',
-      shortLabel: 'Álló helyzet',
+      label: 'Sík terep',
+      shortLabel: 'Sík terep',
       headingDeg,
       compassDirection,
       isPredictiveActive: false,
@@ -552,7 +553,7 @@ export function calculateSlopeMetrics(
       altitudeMeters: Math.round(latestAlt),
       hasAltitudeData: true,
       horizontalDistanceMeters: Math.round(accumulatedDistMeters),
-      label: 'Sík terep (0.0°)',
+      label: 'Sík terep',
       shortLabel: 'Sík terep',
       projectedPoints,
       headingDeg,
@@ -669,8 +670,8 @@ export function calculateSlopeMetrics(
 
   // Step 6: Grounded Road Deadband and Hysteresis
   // To prevent rapid switching on 1m GPS fluctuations:
-  // - Real slope requires at least 1.8m elevation delta AND 2.6% grade (1.5° angle) to ENTER
-  // - Once in uphill/downhill, hysteresis keeps the state until dropping below 0.9° / 1.0m delta
+  // - Real slope requires at least 2.8m elevation delta AND 3.0% grade (1.7° angle) to ENTER
+  // - Once in uphill/downhill, hysteresis keeps the state until dropping below 1.0° / 1.8m delta
   const absDelta = Math.abs(totalElevationDelta);
   const prevDir = previousMetrics?.direction || 'flat';
 
@@ -679,12 +680,12 @@ export function calculateSlopeMetrics(
   let targetGrade = 0;
 
   if (prevDir === 'up') {
-    // In uphill state: stay uphill if angle >= 0.9° and totalElevationDelta >= 0.9m
-    if (rawAngleDeg >= 0.9 && totalElevationDelta >= 0.9) {
+    // In uphill state: stay uphill if angle >= 1.0° and totalElevationDelta >= 1.8m
+    if (rawAngleDeg >= 1.0 && totalElevationDelta >= 1.8) {
       resolvedDirection = 'up';
       targetAngle = rawAngleDeg;
       targetGrade = rawGradePercent;
-    } else if (rawAngleDeg <= -1.6 && totalElevationDelta <= -1.8) {
+    } else if (rawAngleDeg <= -1.8 && totalElevationDelta <= -2.6) {
       // Confirmed sharp reversal directly to downhill
       resolvedDirection = 'down';
       targetAngle = rawAngleDeg;
@@ -695,12 +696,12 @@ export function calculateSlopeMetrics(
       targetGrade = 0;
     }
   } else if (prevDir === 'down') {
-    // In downhill state: stay downhill if angle <= -0.9° and totalElevationDelta <= -0.9m
-    if (rawAngleDeg <= -0.9 && totalElevationDelta <= -0.9) {
+    // In downhill state: stay downhill if angle <= -1.0° and totalElevationDelta <= -1.8m
+    if (rawAngleDeg <= -1.0 && totalElevationDelta <= -1.8) {
       resolvedDirection = 'down';
       targetAngle = rawAngleDeg;
       targetGrade = rawGradePercent;
-    } else if (rawAngleDeg >= 1.6 && totalElevationDelta >= 1.8) {
+    } else if (rawAngleDeg >= 1.8 && totalElevationDelta >= 2.6) {
       // Confirmed sharp reversal directly to uphill
       resolvedDirection = 'up';
       targetAngle = rawAngleDeg;
@@ -711,16 +712,16 @@ export function calculateSlopeMetrics(
       targetGrade = 0;
     }
   } else {
-    // Previously flat: require robust threshold to declare uphill or downhill
-    if (rawAngleDeg >= 1.5 && absDelta >= 1.8 && rawGradePercent >= 2.6) {
+    // Previously flat: require robust threshold (>= 2.8m delta and >= 3.0% grade) to declare uphill or downhill
+    if (rawAngleDeg >= 1.7 && absDelta >= 2.8 && rawGradePercent >= 3.0) {
       resolvedDirection = 'up';
-      // Soft threshold subtraction so transition is progressive
-      targetAngle = Math.max(0.8, rawAngleDeg - 0.5);
-      targetGrade = Math.max(1.4, rawGradePercent - 1.0);
-    } else if (rawAngleDeg <= -1.5 && absDelta >= 1.8 && rawGradePercent <= -2.6) {
+      // Soft threshold subtraction so transition is progressive and not abrupt
+      targetAngle = Math.max(1.0, rawAngleDeg - 0.5);
+      targetGrade = Math.max(1.6, rawGradePercent - 1.0);
+    } else if (rawAngleDeg <= -1.7 && absDelta >= 2.8 && rawGradePercent <= -3.0) {
       resolvedDirection = 'down';
-      targetAngle = Math.min(-0.8, rawAngleDeg + 0.5);
-      targetGrade = Math.min(-1.4, rawGradePercent + 1.0);
+      targetAngle = Math.min(-1.0, rawAngleDeg + 0.5);
+      targetGrade = Math.min(-1.6, rawGradePercent + 1.0);
     } else {
       resolvedDirection = 'flat';
       targetAngle = 0;
@@ -729,12 +730,12 @@ export function calculateSlopeMetrics(
   }
 
   // Step 7: Temporal Exponential Smoothing
-  // Smooth the angle with previous readings (60% previous + 40% current) so transitions are gradual and natural
+  // Smooth the angle with previous readings (70% previous + 30% current) so transitions are gradual and natural
   let finalAngle = targetAngle;
   let finalGrade = targetGrade;
   if (previousMetrics && previousMetrics.hasAltitudeData && previousMetrics.direction === resolvedDirection) {
-    finalAngle = 0.58 * previousMetrics.angleDeg + 0.42 * targetAngle;
-    finalGrade = 0.58 * previousMetrics.gradePercent + 0.42 * targetGrade;
+    finalAngle = 0.70 * previousMetrics.angleDeg + 0.30 * targetAngle;
+    finalGrade = 0.70 * previousMetrics.gradePercent + 0.30 * targetGrade;
   }
 
   const roundedAngle = Math.round(finalAngle * 10) / 10;
@@ -745,12 +746,12 @@ export function calculateSlopeMetrics(
   let sign = '';
 
   if (resolvedDirection === 'up') {
-    shortLabel = 'Felfelé menet';
-    label = 'Felfelé menet';
+    shortLabel = 'Emelkedő';
+    label = 'Emelkedő';
     sign = '+';
   } else if (resolvedDirection === 'down') {
-    shortLabel = 'Lejtmenet';
-    label = 'Lejtmenet';
+    shortLabel = 'Lejtő';
+    label = 'Lejtő';
     sign = roundedAngle < 0 ? '' : '-';
   }
 
@@ -761,7 +762,7 @@ export function calculateSlopeMetrics(
     angleDeg: roundedAngle,
     gradePercent: roundedGrade,
     direction: resolvedDirection,
-    label: `${label} (${sign}${roundedAngle.toFixed(1)}°)`,
+    label,
     shortLabel,
     formattedAngle: `${sign}${roundedAngle.toFixed(1)}°`,
     formattedGrade: `${roundedGrade > 0 ? '+' : ''}${roundedGrade}%`,
