@@ -55,6 +55,7 @@ interface MapsViewProps {
   currentSplitDistanceKm: number;
   settings: UserSettings;
   loadedSession?: ActivitySession | null;
+  savedSessions?: ActivitySession[];
   onUnloadSession?: () => void;
   onStart: () => void;
   onPause: () => void;
@@ -79,6 +80,7 @@ export const MapsView: React.FC<MapsViewProps> = ({
   currentSplitDistanceKm,
   settings,
   loadedSession = null,
+  savedSessions = [],
   onUnloadSession,
   onStart,
   onPause,
@@ -223,18 +225,42 @@ export const MapsView: React.FC<MapsViewProps> = ({
   // Rolling slope metrics ref for hysteresis and temporal smoothing
   const lastSlopeMetricsRef = useRef<SlopeMetrics | null>(null);
 
+  // Combine loaded reference track and all saved history sessions for slope corridor knowledge
+  const referenceRoutes = useMemo(() => {
+    const list: { title?: string; coordinates: Coordinate[] }[] = [];
+    if (loadedSession && loadedSession.coordinates && loadedSession.coordinates.length >= 2) {
+      list.push({
+        title: loadedSession.title || 'Betöltött útvonal',
+        coordinates: loadedSession.coordinates,
+      });
+    }
+    if (savedSessions && savedSessions.length > 0) {
+      for (const sess of savedSessions) {
+        if (loadedSession && sess.id === loadedSession.id) continue;
+        if (sess.coordinates && sess.coordinates.length >= 2) {
+          list.push({
+            title: sess.title || sess.formattedDate || 'Mentett útvonal',
+            coordinates: sess.coordinates,
+          });
+        }
+      }
+    }
+    return list;
+  }, [loadedSession, savedSessions]);
+
   // Slope / Incline / Grade calculation (Lejtmenet / Felfelé menet szög és meredekség)
-  // Incorporates 1-2 forward lookahead points along heading and robust hysteresis
+  // Incorporates pre-recorded saved route corridors, predictive lookahead, and robust hysteresis
   const slopeMetrics: SlopeMetrics = useMemo(() => {
     const metrics = calculateSlopeMetrics(
       currentLocation,
       trackForSlope,
       currentSpeedKmh,
-      lastSlopeMetricsRef.current
+      lastSlopeMetricsRef.current,
+      referenceRoutes
     );
     lastSlopeMetricsRef.current = metrics;
     return metrics;
-  }, [currentLocation, trackForSlope, currentSpeedKmh]);
+  }, [currentLocation, trackForSlope, currentSpeedKmh, referenceRoutes]);
 
   // Formatted main distance
   const formattedDistance = formatDistanceByUnit(totalDistanceKm, settings.unit);
@@ -409,6 +435,12 @@ export const MapsView: React.FC<MapsViewProps> = ({
                   {slopeMetrics.formattedGrade} {slopeMetrics.shortLabel}
                 </span>
               </div>
+              {slopeMetrics.isRouteMatched && (
+                <div className="mt-1 flex items-center gap-1 text-[9px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 truncate" title={`Mentett útvonalból: ${slopeMetrics.matchedRouteName}`}>
+                  <span>🗺️</span>
+                  <span className="truncate">{slopeMetrics.matchedRouteName || 'Mentett útvonal'}</span>
+                </div>
+              )}
             </div>
 
             {/* 2. AKTUÁLIS SEBESSÉG (alatta legyen az aktuális sebesség) */}
@@ -671,6 +703,15 @@ export const MapsView: React.FC<MapsViewProps> = ({
                             {slopeMetrics.shortLabel}
                           </span>
                         </div>
+                        {slopeMetrics.isRouteMatched && (
+                          <div className="flex items-center justify-between px-2 py-0.5 bg-emerald-50 rounded border border-emerald-200 text-[10px] text-emerald-800 font-bold truncate">
+                            <span className="flex items-center gap-1 truncate">
+                              <span>🗺️</span>
+                              <span className="truncate">{slopeMetrics.matchedRouteName || 'Mentett útvonal'}</span>
+                            </span>
+                            <span className="text-[9px] text-emerald-600 font-mono font-black ml-1 whitespace-nowrap">Korridor mentén</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ) : (
@@ -757,6 +798,16 @@ export const MapsView: React.FC<MapsViewProps> = ({
                           {slopeMetrics.shortLabel}
                         </span>
                       </div>
+
+                      {slopeMetrics.isRouteMatched && (
+                        <div className="flex items-center justify-between px-2 py-0.5 bg-emerald-50 rounded border border-emerald-200 text-[10px] text-emerald-800 font-bold truncate">
+                          <span className="flex items-center gap-1 truncate">
+                            <span>🗺️</span>
+                            <span className="truncate">{slopeMetrics.matchedRouteName || 'Mentett útvonal'}</span>
+                          </span>
+                          <span className="text-[9px] text-emerald-600 font-mono font-black ml-1 whitespace-nowrap">Mentett útvonal alapján</span>
+                        </div>
+                      )}
 
                       {/* GPS Coordinates preview - compact */}
                       <div className="pt-0.5 border-t border-slate-200/80 text-[10px] font-mono text-slate-600 flex items-center justify-between leading-none">

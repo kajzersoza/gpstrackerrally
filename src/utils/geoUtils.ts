@@ -262,6 +262,8 @@ export interface SlopeMetrics {
   headingDeg?: number | null;
   compassDirection?: string | null;
   isPredictiveActive?: boolean;
+  matchedRouteName?: string | null;
+  isRouteMatched?: boolean;
 }
 
 /**
@@ -398,29 +400,218 @@ export function calculateForwardGpsPoints(
   return projected;
 }
 
+export interface RouteSlopeMatchResult {
+  matched: boolean;
+  routeName: string | null;
+  gradePercent: number;
+  angleDeg: number;
+  elevationDelta: number;
+  distanceToRouteMeters: number;
+  travelDirection: 'forward' | 'reverse';
+  confidenceWeight: number;
+}
+
+/**
+ * Checks all available saved and reference routes to detect if the user's current GPS position
+ * is traversing along a known route corridor (<= 65m cross-track distance).
+ * When matched, extracts the pre-recorded/mapped ground elevation profile in the user's direction of travel.
+ */
+export function extractSlopeFromSavedRoutes(
+  currentLocation: Coordinate,
+  userHeading: number | null,
+  referenceRoutes: { title?: string; coordinates: Coordinate[] }[],
+  windowMeters: number = 110
+): RouteSlopeMatchResult | null {
+  if (!currentLocation || typeof currentLocation.lat !== 'number' || typeof currentLocation.lng !== 'number') {
+    return null;
+  }
+  if (!referenceRoutes || referenceRoutes.length === 0) return null;
+
+  let bestMatch: {
+    route: { title?: string; coordinates: Coordinate[] };
+    pointIndex: number;
+    crossDistance: number;
+  } | null = null;
+
+  for (const r of referenceRoutes) {
+    const coords = r.coordinates;
+    if (!coords || coords.length < 2) continue;
+
+    let minD = Infinity;
+    let minIdx = -1;
+    for (let i = 0; i < coords.length; i++) {
+      const d = calculateDistance(currentLocation.lat, currentLocation.lng, coords[i].lat, coords[i].lng) * 1000;
+      if (d < minD) {
+        minD = d;
+        minIdx = i;
+      }
+    }
+
+    if (minIdx !== -1 && minD <= 65) {
+      if (!bestMatch || minD < bestMatch.crossDistance) {
+        bestMatch = { route: r, pointIndex: minIdx, crossDistance: minD };
+      }
+    }
+  }
+
+  if (!bestMatch) return null;
+
+  const { route, pointIndex, crossDistance } = bestMatch;
+  const coords = route.coordinates;
+  const N = coords.length;
+
+  // Determine user travel direction relative to the saved route
+  let travelDirection: 'forward' | 'reverse' = 'forward';
+  if (userHeading != null && userHeading >= 0) {
+    const nextIdx = Math.min(N - 1, pointIndex + 1);
+    const prevIdx = Math.max(0, pointIndex - 1);
+    if (nextIdx !== prevIdx) {
+      const routeBearing = calculateBearing(coords[prevIdx].lat, coords[prevIdx].lng, coords[nextIdx].lat, coords[nextIdx].lng);
+      let diff = Math.abs(userHeading - routeBearing);
+      if (diff > 180) diff = 360 - diff;
+      if (diff > 90) {
+        travelDirection = 'reverse';
+      }
+    }
+  }
+
+  // Sample points along the route corridor around pointIndex in travel direction
+  const samplePoints: { dist: number; alt: number }[] = [];
+  const halfWindow = windowMeters / 2;
+
+  if (travelDirection === 'forward') {
+    // Forward travel: from behind pointIndex towards ahead of pointIndex
+    let startIdx = pointIndex;
+    let backDist = 0;
+    while (startIdx > 0 && backDist < halfWindow) {
+      backDist += calculateDistance(coords[startIdx - 1].lat, coords[startIdx - 1].lng, coords[startIdx].lat, coords[startIdx].lng) * 1000;
+      startIdx--;
+    }
+
+    let endIdx = pointIndex;
+    let fwdDist = 0;
+    while (endIdx < N - 1 && (backDist + fwdDist) < windowMeters) {
+      fwdDist += calculateDistance(coords[endIdx].lat, coords[endIdx].lng, coords[endIdx + 1].lat, coords[endIdx + 1].lng) * 1000;
+      endIdx++;
+    }
+
+    // If elevation across this window is flat but route continues, expand up to 160m to span quantized GPS elevation steps
+    while (
+      endIdx < N - 1 &&
+      coords[endIdx].altitude != null &&
+      coords[startIdx].altitude != null &&
+      Math.abs((coords[endIdx].altitude || 0) - (coords[startIdx].altitude || 0)) < 0.5 &&
+      (backDist + fwdDist) < 160
+    ) {
+      fwdDist += calculateDistance(coords[endIdx].lat, coords[endIdx].lng, coords[endIdx + 1].lat, coords[endIdx + 1].lng) * 1000;
+      endIdx++;
+    }
+
+    let dAcc = 0;
+    for (let i = startIdx; i <= endIdx; i++) {
+      if (i > startIdx) {
+        dAcc += calculateDistance(coords[i - 1].lat, coords[i - 1].lng, coords[i].lat, coords[i].lng) * 1000;
+      }
+      if (typeof coords[i].altitude === 'number' && !isNaN(coords[i].altitude!)) {
+        samplePoints.push({ dist: dAcc, alt: coords[i].altitude! });
+      }
+    }
+  } else {
+    // Reverse travel: user travels from higher indices down to lower indices
+    // "Behind" user is higher indices, "ahead" of user is lower indices
+    let startIdx = pointIndex; // behind user (higher index)
+    let backDist = 0;
+    while (startIdx < N - 1 && backDist < halfWindow) {
+      backDist += calculateDistance(coords[startIdx].lat, coords[startIdx].lng, coords[startIdx + 1].lat, coords[startIdx + 1].lng) * 1000;
+      startIdx++;
+    }
+
+    let endIdx = pointIndex; // ahead of user (lower index)
+    let fwdDist = 0;
+    while (endIdx > 0 && (backDist + fwdDist) < windowMeters) {
+      fwdDist += calculateDistance(coords[endIdx - 1].lat, coords[endIdx - 1].lng, coords[endIdx].lat, coords[endIdx].lng) * 1000;
+      endIdx--;
+    }
+
+    while (
+      endIdx > 0 &&
+      coords[endIdx].altitude != null &&
+      coords[startIdx].altitude != null &&
+      Math.abs((coords[endIdx].altitude || 0) - (coords[startIdx].altitude || 0)) < 0.5 &&
+      (backDist + fwdDist) < 160
+    ) {
+      fwdDist += calculateDistance(coords[endIdx - 1].lat, coords[endIdx - 1].lng, coords[endIdx].lat, coords[endIdx].lng) * 1000;
+      endIdx--;
+    }
+
+    let dAcc = 0;
+    for (let i = startIdx; i >= endIdx; i--) {
+      if (i < startIdx) {
+        dAcc += calculateDistance(coords[i + 1].lat, coords[i + 1].lng, coords[i].lat, coords[i].lng) * 1000;
+      }
+      if (typeof coords[i].altitude === 'number' && !isNaN(coords[i].altitude!)) {
+        samplePoints.push({ dist: dAcc, alt: coords[i].altitude! });
+      }
+    }
+  }
+
+  if (samplePoints.length < 2) return null;
+  const P = samplePoints.length;
+  const totalD = samplePoints[P - 1].dist;
+  if (totalD < 8) return null;
+
+  // Linear regression on route elevation profile along distance
+  let sumX = 0;
+  let sumY = 0;
+  for (let i = 0; i < P; i++) {
+    sumX += samplePoints[i].dist;
+    sumY += samplePoints[i].alt;
+  }
+  const meanX = sumX / P;
+  const meanY = sumY / P;
+  let covXY = 0;
+  let varX = 0;
+  for (let i = 0; i < P; i++) {
+    const dx = samplePoints[i].dist - meanX;
+    const dy = samplePoints[i].alt - meanY;
+    covXY += dx * dy;
+    varX += dx * dx;
+  }
+
+  const regSlope = varX > 0.001 ? covXY / varX : 0;
+  const endSlope = (samplePoints[P - 1].alt - samplePoints[0].alt) / totalD;
+  const slope = 0.75 * regSlope + 0.25 * endSlope;
+
+  const gradePercent = slope * 100;
+  const angleDeg = (Math.atan(slope) * 180) / Math.PI;
+
+  // Confidence is highest right on the corridor centerline (<= 20m), decaying smoothly to 0.45 at 65m
+  const confidenceWeight = crossDistance <= 20
+    ? 0.90
+    : Math.max(0.45, 0.90 - ((crossDistance - 20) / 45) * 0.45);
+
+  return {
+    matched: true,
+    routeName: route.title || 'Mentett útvonal',
+    gradePercent,
+    angleDeg,
+    elevationDelta: samplePoints[P - 1].alt - samplePoints[0].alt,
+    distanceToRouteMeters: crossDistance,
+    travelDirection,
+    confidenceWeight,
+  };
+}
+
 /**
  * Calculates current slope / grade / angle of incline or decline based on GPS position,
- * distance, speed, and elevation data from the recorded route so far.
- *
- * ADVANCED PREDICTIVE & HYSTERESIS SMOOTHED METHOD:
- * 1. Computes 1-2 forward lookahead GPS points along current direction and velocity vector.
- * 2. Uses extended baseline window (65m - 110m for cycling, 45m - 60m for walking, 110m - 200m for car)
- *    so normal consumer GPS altitude noise (±1m) produces < 1.2% grade and is eliminated.
- * 3. Directional Momentum Lookahead: forward points anchor the trajectory in the direction of travel,
- *    preventing single-second 1m GPS spikes from flipping the slope sign.
- * 4. Multi-stage filtering: rate limits single-step vertical jumps, applies median filter,
- *    and distance-weighted exponential smoothing (tau ~ 14m).
- * 5. Elevated Noise Floor & Deadband: requires at least 1.8m - 2.0m of real elevation change
- *    and 2.6% grade (1.5° angle) to trigger incline/decline.
- * 6. State Hysteresis: maintains smooth transitions between 'flat', 'up', and 'down' without
- *    fluttering or rapid toggling.
- * 7. Temporal Smoothing: blends consecutive angle values to guarantee progressive, natural transitions.
+ * distance, speed, and elevation data from the recorded route and any matching saved routes.
  */
 export function calculateSlopeMetrics(
   currentLocation: Coordinate | null,
   coordinates: Coordinate[],
   currentSpeedKmh: number = 0,
-  previousMetrics?: SlopeMetrics | null
+  previousMetrics?: SlopeMetrics | null,
+  referenceRoutes?: { title?: string; coordinates: Coordinate[] }[]
 ): SlopeMetrics {
   const defaultMetrics: SlopeMetrics = {
     angleDeg: 0,
@@ -438,6 +629,8 @@ export function calculateSlopeMetrics(
     headingDeg: null,
     compassDirection: null,
     isPredictiveActive: false,
+    matchedRouteName: null,
+    isRouteMatched: false,
   };
 
   const rawList = Array.isArray(coordinates) ? coordinates : [];
@@ -462,10 +655,21 @@ export function calculateSlopeMetrics(
 
   // Compute 1-2 forward lookahead points based on direction and speed
   const projectedPoints = calculateForwardGpsPoints(currentLoc, track, 2, currentSpeedKmh);
-  const headingDeg = (projectedPoints.length > 0 && projectedPoints[0].heading != null)
+  let resolvedHeading = (projectedPoints.length > 0 && projectedPoints[0].heading != null)
     ? projectedPoints[0].heading
     : (currentLoc?.heading ?? null);
-  const compassDirection = headingDeg != null ? getCompassDirection(headingDeg) : null;
+
+  // If heading is not directly provided by sensor, derive from motion vector
+  if (resolvedHeading == null && track.length >= 2) {
+    const pPrev = track[track.length - 2];
+    const pCurr = track[track.length - 1];
+    const dM = calculateDistance(pPrev.lat, pPrev.lng, pCurr.lat, pCurr.lng) * 1000;
+    if (dM >= 1.0) {
+      resolvedHeading = calculateBearing(pPrev.lat, pPrev.lng, pCurr.lat, pCurr.lng);
+    }
+  }
+
+  const compassDirection = resolvedHeading != null ? getCompassDirection(resolvedHeading) : null;
 
   // Find the latest valid numeric altitude
   let latestAlt: number | null = null;
@@ -476,27 +680,62 @@ export function calculateSlopeMetrics(
     }
   }
 
+  // Physical Baseline Window along the route:
+  // For walking (< 8 km/h): window is 40m - 50m
+  // For cycling (8 - 35 km/h): window of 55m - 95m (approx. 14-22 seconds of cycling)
+  // For driving (> 35 km/h): window is 85m - 140m
+  const targetWindowMeters = Math.max(
+    40,
+    Math.min(140, currentSpeedKmh > 35 ? currentSpeedKmh * 1.8 : currentSpeedKmh > 8 ? Math.max(55, currentSpeedKmh * 3.5) : 45)
+  );
+
+  // Check if current position matches any saved route or loaded reference track
+  const routeMatch = (referenceRoutes && referenceRoutes.length > 0 && currentLoc)
+    ? extractSlopeFromSavedRoutes(currentLoc, resolvedHeading, referenceRoutes, Math.max(110, targetWindowMeters))
+    : null;
+
   if (latestAlt === null) {
+    if (routeMatch) {
+      // If sensor altitude is missing but we are on a saved route, we can still provide valid route slope
+      const roundedAngle = Math.round(Math.abs(routeMatch.angleDeg) * 10) / 10;
+      const roundedGrade = Math.round(Math.abs(routeMatch.gradePercent));
+      const isUp = routeMatch.gradePercent >= 1.5 && routeMatch.elevationDelta >= 0.4;
+      const isDown = routeMatch.gradePercent <= -1.5 && routeMatch.elevationDelta <= -0.4;
+      const dir = isUp ? 'up' : isDown ? 'down' : 'flat';
+      const sign = isUp ? '+' : isDown ? '-' : '';
+      return {
+        ...defaultMetrics,
+        angleDeg: dir === 'flat' ? 0 : (dir === 'down' ? -roundedAngle : roundedAngle),
+        gradePercent: dir === 'flat' ? 0 : (dir === 'down' ? -roundedGrade : roundedGrade),
+        direction: dir,
+        label: dir === 'up' ? 'Emelkedő' : dir === 'down' ? 'Lejtő' : 'Sík terep',
+        shortLabel: dir === 'up' ? 'Emelkedő' : dir === 'down' ? 'Lejtő' : 'Sík terep',
+        formattedAngle: dir === 'flat' ? '0.0°' : `${sign}${roundedAngle.toFixed(1)}°`,
+        formattedGrade: dir === 'flat' ? '0%' : `${sign}${roundedGrade}%`,
+        hasAltitudeData: true,
+        horizontalDistanceMeters: Math.round(targetWindowMeters),
+        elevationDeltaMeters: Math.round(routeMatch.elevationDelta * 10) / 10,
+        projectedPoints,
+        headingDeg: resolvedHeading,
+        compassDirection,
+        isPredictiveActive: projectedPoints.length > 0,
+        matchedRouteName: routeMatch.routeName,
+        isRouteMatched: true,
+      };
+    }
+
     return {
       ...defaultMetrics,
       hasAltitudeData: false,
       label: 'Sík terep',
       shortLabel: 'Sík terep',
       projectedPoints,
-      headingDeg,
+      headingDeg: resolvedHeading,
       compassDirection,
       isPredictiveActive: projectedPoints.length > 0,
     };
   }
 
-  // Physical Baseline Window along the route:
-  // For walking (< 8 km/h): window is 35m - 50m
-  // For cycling (8 - 35 km/h): window of 45m - 75m (approx. 12-18 seconds of cycling)
-  // For driving (> 35 km/h): window is 75m - 140m
-  const targetWindowMeters = Math.max(
-    35,
-    Math.min(140, currentSpeedKmh > 35 ? currentSpeedKmh * 1.8 : currentSpeedKmh > 8 ? Math.max(45, currentSpeedKmh * 3.2) : 40)
-  );
   // Minimum required distance along the route before computing non-flat slope
   const minRequiredMeters = 16;
   const maxPointsToCollect = 40;
@@ -539,14 +778,47 @@ export function calculateSlopeMetrics(
       horizontalDistanceMeters: Math.round(accumulatedDistMeters),
       label: 'Sík terep',
       shortLabel: 'Sík terep',
-      headingDeg,
+      headingDeg: resolvedHeading,
       compassDirection,
       isPredictiveActive: false,
+      matchedRouteName: routeMatch?.routeName || null,
+      isRouteMatched: Boolean(routeMatch),
     };
   }
 
-  // If total distance along recorded track is under minRequiredMeters or fewer than 2 points, return flat
+  // If total distance along recorded track is under minRequiredMeters or fewer than 2 points:
+  // Check if we can derive high-confidence slope from the matched saved route!
   if (accumulatedDistMeters < minRequiredMeters || collectedPointsRev.length < 2) {
+    if (routeMatch) {
+      const roundedAngle = Math.round(Math.abs(routeMatch.angleDeg) * 10) / 10;
+      const roundedGrade = Math.round(Math.abs(routeMatch.gradePercent));
+      const isUp = routeMatch.gradePercent >= 1.5 && routeMatch.elevationDelta >= 0.4;
+      const isDown = routeMatch.gradePercent <= -1.5 && routeMatch.elevationDelta <= -0.4;
+      const dir = isUp ? 'up' : isDown ? 'down' : 'flat';
+      const sign = isUp ? '+' : isDown ? '-' : '';
+
+      return {
+        ...defaultMetrics,
+        angleDeg: dir === 'flat' ? 0 : (dir === 'down' ? -roundedAngle : roundedAngle),
+        gradePercent: dir === 'flat' ? 0 : (dir === 'down' ? -roundedGrade : roundedGrade),
+        direction: dir,
+        label: dir === 'up' ? 'Emelkedő' : dir === 'down' ? 'Lejtő' : 'Sík terep',
+        shortLabel: dir === 'up' ? 'Emelkedő' : dir === 'down' ? 'Lejtő' : 'Sík terep',
+        formattedAngle: dir === 'flat' ? '0.0°' : `${sign}${roundedAngle.toFixed(1)}°`,
+        formattedGrade: dir === 'flat' ? '0%' : `${sign}${roundedGrade}%`,
+        altitudeMeters: Math.round(latestAlt),
+        hasAltitudeData: true,
+        horizontalDistanceMeters: Math.round(accumulatedDistMeters),
+        elevationDeltaMeters: Math.round(routeMatch.elevationDelta * 10) / 10,
+        projectedPoints,
+        headingDeg: resolvedHeading,
+        compassDirection,
+        isPredictiveActive: projectedPoints.length > 0,
+        matchedRouteName: routeMatch.routeName,
+        isRouteMatched: true,
+      };
+    }
+
     return {
       ...defaultMetrics,
       altitudeMeters: Math.round(latestAlt),
@@ -555,7 +827,7 @@ export function calculateSlopeMetrics(
       label: 'Sík terep',
       shortLabel: 'Sík terep',
       projectedPoints,
-      headingDeg,
+      headingDeg: resolvedHeading,
       compassDirection,
       isPredictiveActive: projectedPoints.length > 0,
     };
@@ -588,13 +860,43 @@ export function calculateSlopeMetrics(
   }
 
   if (validPoints.length < 2 || cumDist < minRequiredMeters) {
+    if (routeMatch) {
+      const roundedAngle = Math.round(Math.abs(routeMatch.angleDeg) * 10) / 10;
+      const roundedGrade = Math.round(Math.abs(routeMatch.gradePercent));
+      const isUp = routeMatch.gradePercent >= 1.5 && routeMatch.elevationDelta >= 0.4;
+      const isDown = routeMatch.gradePercent <= -1.5 && routeMatch.elevationDelta <= -0.4;
+      const dir = isUp ? 'up' : isDown ? 'down' : 'flat';
+      const sign = isUp ? '+' : isDown ? '-' : '';
+
+      return {
+        ...defaultMetrics,
+        angleDeg: dir === 'flat' ? 0 : (dir === 'down' ? -roundedAngle : roundedAngle),
+        gradePercent: dir === 'flat' ? 0 : (dir === 'down' ? -roundedGrade : roundedGrade),
+        direction: dir,
+        label: dir === 'up' ? 'Emelkedő' : dir === 'down' ? 'Lejtő' : 'Sík terep',
+        shortLabel: dir === 'up' ? 'Emelkedő' : dir === 'down' ? 'Lejtő' : 'Sík terep',
+        formattedAngle: dir === 'flat' ? '0.0°' : `${sign}${roundedAngle.toFixed(1)}°`,
+        formattedGrade: dir === 'flat' ? '0%' : `${sign}${roundedGrade}%`,
+        altitudeMeters: Math.round(latestAlt),
+        hasAltitudeData: true,
+        horizontalDistanceMeters: Math.round(cumDist),
+        elevationDeltaMeters: Math.round(routeMatch.elevationDelta * 10) / 10,
+        projectedPoints,
+        headingDeg: resolvedHeading,
+        compassDirection,
+        isPredictiveActive: projectedPoints.length > 0,
+        matchedRouteName: routeMatch.routeName,
+        isRouteMatched: true,
+      };
+    }
+
     return {
       ...defaultMetrics,
       altitudeMeters: Math.round(latestAlt),
       hasAltitudeData: true,
       horizontalDistanceMeters: Math.round(cumDist),
       projectedPoints,
-      headingDeg,
+      headingDeg: resolvedHeading,
       compassDirection,
       isPredictiveActive: projectedPoints.length > 0,
     };
@@ -627,7 +929,7 @@ export function calculateSlopeMetrics(
 
   // Step 3: Slope computation (Linear regression + Endpoint trend blend)
   const totalWindowDist = Math.max(1.0, validPoints[M - 1].dist - validPoints[0].dist);
-  const totalElevationDelta = smoothedAlts[M - 1] - smoothedAlts[0];
+  let totalElevationDelta = smoothedAlts[M - 1] - smoothedAlts[0];
 
   let regressionSlope = 0;
   if (M === 2) {
@@ -659,15 +961,25 @@ export function calculateSlopeMetrics(
   let rawGradePercent = regressionSlope * 100;
   let rawAngleDeg = (Math.atan(regressionSlope) * 180) / Math.PI;
 
+  // Step 3.5: Multi-Source Fusion with Saved Routes / Tracks
+  // If the user's position matches a previously recorded or saved route, blend the pre-recorded
+  // route profile to stabilize and elevate accuracy against noisy real-time GPS sensor fluctuations
+  if (routeMatch) {
+    const w = routeMatch.confidenceWeight; // e.g. 0.75 - 0.90
+    rawGradePercent = w * routeMatch.gradePercent + (1 - w) * rawGradePercent;
+    rawAngleDeg = w * routeMatch.angleDeg + (1 - w) * rawAngleDeg;
+    totalElevationDelta = w * routeMatch.elevationDelta + (1 - w) * totalElevationDelta;
+  }
+
   // Strict physical clamp to realistic road limits (max ±18% grade, max ±10° angle)
   rawGradePercent = Math.max(-18, Math.min(18, rawGradePercent));
   rawAngleDeg = Math.max(-10, Math.min(10, rawAngleDeg));
 
   // Step 4: Road Deadband and State Hysteresis
-  // Real cycling standards:
+  // Cycling slope standards:
   // - "Sík terep" (flat): grade between -1.5% and +1.5%
-  // - "Emelkedő" (uphill): grade >= +1.5% AND delta >= +0.5m
-  // - "Lejtő" (downhill): grade <= -1.5% AND delta <= -0.5m
+  // - "Emelkedő" (uphill): grade >= +1.5% AND delta >= +0.4m
+  // - "Lejtő" (downhill): grade <= -1.5% AND delta <= -0.4m
   const prevDir = previousMetrics?.direction || 'flat';
 
   let resolvedDirection: 'up' | 'down' | 'flat' = 'flat';
@@ -708,13 +1020,13 @@ export function calculateSlopeMetrics(
     }
   } else {
     // Previously flat:
-    // To enter uphill: grade >= +1.5% AND delta >= +0.5m
-    // To enter downhill: grade <= -1.5% AND delta <= -0.5m
-    if (rawGradePercent >= 1.5 && totalElevationDelta >= 0.5) {
+    // To enter uphill: grade >= +1.5% AND delta >= +0.4m
+    // To enter downhill: grade <= -1.5% AND delta <= -0.4m
+    if (rawGradePercent >= 1.5 && totalElevationDelta >= 0.4) {
       resolvedDirection = 'up';
       targetAngle = rawAngleDeg;
       targetGrade = rawGradePercent;
-    } else if (rawGradePercent <= -1.5 && totalElevationDelta <= -0.5) {
+    } else if (rawGradePercent <= -1.5 && totalElevationDelta <= -0.4) {
       resolvedDirection = 'down';
       targetAngle = rawAngleDeg;
       targetGrade = rawGradePercent;
@@ -766,9 +1078,11 @@ export function calculateSlopeMetrics(
     horizontalDistanceMeters: Math.round(totalWindowDist),
     elevationDeltaMeters: Math.round(totalElevationDelta * 10) / 10,
     projectedPoints,
-    headingDeg,
+    headingDeg: resolvedHeading,
     compassDirection,
     isPredictiveActive: projectedPoints.length > 0,
+    matchedRouteName: routeMatch?.routeName || null,
+    isRouteMatched: Boolean(routeMatch),
   };
 }
 

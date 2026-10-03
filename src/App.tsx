@@ -1090,6 +1090,7 @@ export default function App() {
               currentSplitDistanceKm={currentSplitDistanceKm}
               settings={settings}
               loadedSession={loadedSession}
+              savedSessions={savedSessions}
               onUnloadSession={handleUnloadSession}
               onStart={handleStart}
               onPause={handlePause}
